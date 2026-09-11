@@ -1,0 +1,92 @@
+﻿flowchart TD
+    %% Styling Classes
+    classDef stepStyle fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
+    classDef decisionStyle fill:#fffde7,stroke:#fbc02d,stroke-width:2px,color:#f57f17;
+    classDef modelStyle fill:#ede7f6,stroke:#512da8,stroke-width:2px,color:#311b92;
+    classDef outputStyle fill:#e0f2f1,stroke:#00695c,stroke-width:2px,color:#004d40;
+    classDef trackStyle fill:#fbe9e7,stroke:#d84315,stroke-width:2px,color:#bf360c;
+
+    subgraph VideoInput ["1. Video Input & Ingestion"]
+        S1["Step 1: Input Video Stream<br/>(MP4 / MKV / WEBM / AVI / MOV / 3GP)"]:::stepStyle
+        S2["Step 2: Read Video Frames Consecutively<br/>(Native Video Framerate, Frame Buffer)"]:::stepStyle
+        S1 --> S2
+    end
+
+    subgraph SceneDetection ["2. Consecutive-Frame Visual Change Detection"]
+        S3["Step 3: Calculate Visual Change Score<br/>Score = Delta_H + Delta_S + Delta_V (HSV Diff)"]:::stepStyle
+        S4{"Step 4: Change Score >= 30.0?"}:::decisionStyle
+        S5A["Step 5: Scene Change Detected!<br/>Collect Frame as Candidate Keyframe"]:::stepStyle
+        S5B["No Boundary: Continue to Next Frame"]:::stepStyle
+        Anchor["Anchor Selection: Always Retain Frame 0 @ 0.00s"]:::stepStyle
+
+        S2 --> S3 --> S4
+        S4 -- YES --> S5A
+        S4 -- NO --> S5B
+        S5B --> S3
+        S2 --> Anchor
+    end
+
+    subgraph ObjectDetection ["3. Zero-Shot Detection & Overlap Resolution"]
+        S6["Step 6: Run Grounding DINO on Candidate Frames<br/>(IDEA-Research/grounding-dino-tiny)"]:::modelStyle
+        PromptDINO["Open-Vocabulary Query:<br/>person, man, woman, child, face, chair, table, musical instrument, etc."]:::stepStyle
+        S7["Step 7: Resolve Overlapping Detections & Count<br/>- IoU > 0.45 Bounding Box Merging<br/>- Frame-Level Object & Person Counts"]:::stepStyle
+
+        S5A --> S6
+        Anchor --> S6
+        PromptDINO --> S6
+        S6 --> S7
+    end
+
+    subgraph QualityDeduplication ["4. Quality Check & CLIP Deduplication"]
+        S8["Step 8: Multi-Metric Image Quality Evaluation<br/>- Laplacian Variance Sharpness >= 100.0<br/>- Mean Brightness 15.0 to 240.0<br/>- Pixel Contrast StdDev >= 20.0<br/>- Min Resolution 128x128px"]:::stepStyle
+        S9["Step 9: Batched CLIP ViT Image Embeddings<br/>(openai/clip-vit-base-patch32)"]:::modelStyle
+        S10["Step 10: Pairwise Cosine Similarity Calculation<br/>Sim(F_curr, F_retained) = E_curr . E_retained"]:::stepStyle
+        S11{"Step 11: Cosine Similarity > 0.90?"}:::decisionStyle
+        S11_Drop["Prune Frame as Redundant Duplicate"]:::stepStyle
+        S12["Step 12: Keep ALL Remaining Unique Frames<br/>(Adaptive Keyframes: No Bins, No Arbitrary Cap)"]:::stepStyle
+
+        S7 --> S8 --> S9 --> S10 --> S11
+        S11 -- YES --> S11_Drop
+        S11 -- NO --> S12
+    end
+
+    subgraph VLMCaptioning ["5. Structured Multimodal Scene Captioning"]
+        S13["Step 13: Structured VLM Scene Captioning<br/>(Qwen/Qwen2.5-VL-3B-Instruct)"]:::modelStyle
+        Sections["7 Structured Sections Generated:<br/>Section A: Scene Summary & Key Activity<br/>Section B: People, Attire & Appearance<br/>Section C: Objects, Furniture & Spatial Positions<br/>Section D: Actions, Hand Movements & Trajectories<br/>Section E: Visible Text, Labels & Symbols<br/>Section F: Environment, Lighting & Camera View<br/>Section G: Frame-Level Entity Counts"]:::stepStyle
+
+        S12 --> S13
+        Sections --> S13
+    end
+
+    subgraph PersonTracking ["6. Multi-Feature Person Identity Tracking & Unique Counting"]
+        S14["Step 14: Person Identity Association & Tracking"]:::trackStyle
+        DINOBox["Authoritative Grounding DINO Bounding Boxes<br/>(Extracted Person RoI Crops)"]:::trackStyle
+        Clothing["Clothing Feature Extraction:<br/>- Dominant HSV Clothing Color<br/>- Upper & Lower Attire Color Features"]:::trackStyle
+        SpatialCont["Spatial Continuity & Movement:<br/>- Center Distance Tracking<br/>- Bounding Box Spatial Trajectory Continuity"]:::trackStyle
+        MatchDecide{"Same Physical Person?<br/>Clothing Sim >= 0.70 & Spatial Closeness"}:::decisionStyle
+        UpdateTrack["Update Existing Track:<br/>Assign Persistent ID (e.g. person_001)"]:::trackStyle
+        NewTrack["Create New Track:<br/>Assign New ID (e.g. person_002)"]:::trackStyle
+        OcclusionBuf["Occlusion Buffer Reconnection<br/>(Recovers Person After Temporary Disappearance)"]:::trackStyle
+        UniqueCount["Video-Level Unique Entity Counts:<br/>Distinct Count of Unique Persistent IDs across Entire Video"]:::trackStyle
+
+        S13 --> S14
+        DINOBox --> S14
+        Clothing --> S14
+        SpatialCont --> S14
+        S14 --> MatchDecide
+        MatchDecide -- YES --> UpdateTrack
+        MatchDecide -- NO --> NewTrack
+        UpdateTrack --> OcclusionBuf
+        NewTrack --> OcclusionBuf
+        OcclusionBuf --> UniqueCount
+    end
+
+    subgraph TemporalNotes ["7. Chronological Action Analysis & Persistence"]
+        S15["Step 15: Temporal Scene Notes & Action Analysis<br/>(High-Density Structured Semantic Diffing, NO OLLAMA)"]:::stepStyle
+        DiffEngine["Diff Engine:<br/>- Action Sequence Transition (c_action -> n_action)<br/>- Spatial & Object State Trajectory<br/>- Visible Count Dynamics & Quadrant Shifts"]:::stepStyle
+        S16["Step 16: Save Final Keyframes & Metadata<br/>- JPEG Keyframe Images (keyframes/vid/)<br/>- metadata.json (Complete Visual Timeline)<br/>- entity_tracking_metadata.json (Track History)"]:::outputStyle
+
+        UniqueCount --> S15
+        DiffEngine --> S15
+        S15 --> S16
+    end

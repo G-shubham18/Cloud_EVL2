@@ -1,0 +1,58 @@
+================================================================================
+                    MODELS USED IN ECHOVISION (EVL3)
+================================================================================
+
+1. Whisper-large-v3 (faster-whisper)
+   - Model Name: openai/whisper-large-v3 (implemented via faster-whisper)
+   - Description: State-of-the-art Automatic Speech Recognition (ASR) model for multilingual speech-to-text transcription.
+   - Where Used: Stage 1 Audio Extraction (stage1_offline/audio_extractor.py) to transcribe spoken dialogue with millisecond-accurate timestamps.
+   - Why Chosen: Delivers industry-leading transcription accuracy; faster-whisper's CTranslate2 engine runs up to 4x faster with significantly reduced memory usage compared to standard Whisper.
+
+--------------------------------------------------------------------------------
+
+2. LAION-CLAP (clap-htsat-unfused)
+   - Model Name: laion/clap-htsat-unfused
+   - Description: Contrastive Language-Audio Pretraining model using HTSAT architecture for zero-shot acoustic event classification and joint audio-text embeddings.
+   - Where Used: Stage 1 Audio Extraction (stage1_offline/audio_extractor.py) for 50-class sound event detection, ChromaDB audio vector indexing, and Stage 2 audio candidate retrieval.
+   - Why Chosen: Accurately classifies non-speech environmental sounds and musical instruments while providing a shared embedding space for natural language query retrieval.
+
+--------------------------------------------------------------------------------
+
+3. OpenAI CLIP (clip-vit-base-patch32)
+   - Model Name: openai/clip-vit-base-patch32
+   - Description: Multi-modal vision-language embedding model mapping images and text into a shared latent space.
+   - Where Used: Stage 1 Visual Extraction (stage1_offline/visual_extractor.py) to filter redundant keyframes (>0.90 similarity) and Stage 1 Entity Tracking (stage1_offline/entity_tracker.py) for visual crop re-identification.
+   - Why Chosen: Fast and lightweight; effectively prunes duplicate visual frames to save downstream computation while preserving distinct visual details and cross-frame entity consistency.
+
+--------------------------------------------------------------------------------
+
+4. Qwen2.5-VL-3B-Instruct
+   - Model Name: Qwen/Qwen2.5-VL-3B-Instruct
+   - Description: Advanced compact Vision-Language Model (VLM) for fine-grained image understanding, spatial layout recognition, and scene captioning.
+   - Where Used: Stage 1 Visual Extraction (stage1_offline/visual_extractor.py) to generate structured keyframe descriptions (setting, 2D quadrants, clothing colors, actions, objects, and frame entity counts).
+   - Why Chosen: Provides outstanding spatial reasoning and object/action detection in a compact 3B size, enabling efficient local execution on consumer GPUs and CPUs without the heavy resource demands of 7B+ VLMs.
+
+--------------------------------------------------------------------------------
+
+5. all-MiniLM-L6-v2 (Sentence-Transformers)
+   - Model Name: sentence-transformers/all-MiniLM-L6-v2
+   - Description: Fast, 384-dimensional dense semantic text embedding model.
+   - Where Used: Stage 1 Visual Vector Indexing (FAISS), Stage 2 Modality Classifier (estimating audio vs. visual query weight beta(q)), and Stage 2 visual query retrieval.
+   - Why Chosen: Extremely lightweight and fast with near-instant inference on both CPU and GPU; delivers strong semantic retrieval accuracy with negligible memory overhead.
+
+--------------------------------------------------------------------------------
+
+6. BGE-Reranker-Large
+   - Model Name: BAAI/bge-reranker-large
+   - Description: High-precision cross-encoder model for deep semantic relevance scoring between queries and candidate passages.
+   - Where Used: Stage 2 Re-Ranking (stage2_online/reranker.py) to re-score retrieved audio and visual candidate chunks with joint cross-attention.
+   - Why Chosen: Outperforms bi-encoder cosine similarity by capturing complex query-context interactions; enables custom scoring incorporating audio modality weights and temporal agreement bonuses.
+
+--------------------------------------------------------------------------------
+
+7. Qwen2.5-7B (Ollama) [Fallback: Qwen2-1.5B]
+   - Model Name: qwen2.5:7b (via Ollama; lightweight fallback: qwen2:1.5b)
+   - Description: High-capability open-source Large Language Model (LLM) optimized for reasoning and strict instruction following.
+   - Where Used: Stage 3 Generator (stage3_generator/generator.py) for grounded final answer synthesis and optional temporal transition reasoning.
+   - Why Chosen: Runs entirely locally via Ollama with zero API cost or cloud dependency; strictly adheres to grounded context at temperature 0.0 to prevent hallucinations and generate concise 1-to-5 word answers.
+================================================================================

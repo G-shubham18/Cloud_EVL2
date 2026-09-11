@@ -1,0 +1,69 @@
+﻿flowchart TD
+    %% Styling Classes
+    classDef inputStyle fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1;
+    classDef processStyle fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
+    classDef modelStyle fill:#ede7f6,stroke:#512da8,stroke-width:2px,color:#311b92;
+    classDef dbStyle fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#bf360c;
+    classDef decisionStyle fill:#fffde7,stroke:#fbc02d,stroke-width:2px,color:#f57f17;
+    classDef stage3Style fill:#fbe9e7,stroke:#d84315,stroke-width:2px,color:#bf360c;
+    classDef outputStyle fill:#e0f2f1,stroke:#00695c,stroke-width:2px,color:#004d40;
+
+    subgraph QueryInput ["1. User Query & Question Classification"]
+        Q["User Query / Question q<br/>(Natural Language)"]:::inputStyle
+        QClassifier["QuestionClassifier (all-MiniLM-L6-v2)<br/>Cosine similarity against Audio vs Visual Anchor Clusters"]:::modelStyle
+        BetaCalc["Compute Modality Weight beta(q) in [0.0, 1.0]<br/>Softmax over Semantic Similarity Scores"]:::processStyle
+        DepthAlloc["Dynamic Depth Allocation Formula:<br/>K_a = round(K * beta(q)), K_v = K - K_a<br/>(Defaults: K=15, K_a in [1, 14], K_v in [1, 14])"]:::processStyle
+
+        Q --> QClassifier --> BetaCalc --> DepthAlloc
+    end
+
+    subgraph DecoupledRetrieval ["2. Decoupled Parallel Modality Retrieval"]
+        AudioStore[("ChromaDB Audio Store<br/>(audio_collection)")]:::dbStyle
+        VisualStore[("FAISS / NumPy Visual Store<br/>(visual_index.faiss)")]:::dbStyle
+
+        AudioRetrieve["Audio Branch Retrieval:<br/>Query CLAP Text Encoder -> Top K_a Audio Candidates"]:::processStyle
+        VisualRetrieve["Visual Branch Retrieval:<br/>Query MiniLM Text Encoder -> Top K_v Visual Candidates"]:::processStyle
+
+        DepthAlloc --> AudioRetrieve
+        DepthAlloc --> VisualRetrieve
+        AudioStore --> AudioRetrieve
+        VisualStore --> VisualRetrieve
+    end
+
+    subgraph CandidateEnrichment ["3. Dynamic Candidate Augmentation & Boosting"]
+        LexicalBoost["Lexical Overlap Scoring:<br/>Add +0.30 Boost for Direct Keyword Overlap"]:::processStyle
+        CountBoost["Counting Query Enhancement:<br/>If q contains 'how many' or 'count', add +0.35 Boost<br/>to Video-Level Unique Entity Counts evidence"]:::processStyle
+        SeqExpand["Temporal Sequence Expansion:<br/>For temporal queries, retrieve immediate adjacent<br/>keyframe facts (t-1, t+1) for trajectory continuity"]:::processStyle
+
+        AudioRetrieve --> LexicalBoost
+        VisualRetrieve --> LexicalBoost
+        LexicalBoost --> CountBoost --> SeqExpand
+    end
+
+    subgraph ReRankingNMS ["4. Cross-Encoder Re-Ranking & Temporal NMS"]
+        Reranker["Cross-Encoder Re-Ranker (BAAI/bge-reranker-large)<br/>Full Cross-Attention Score: s = Reranker(q, candidate_text)"]:::modelStyle
+        BonusCalc["Modality & Temporal Agreement Bonus:<br/>+1.0 Audio Bonus (if beta >= 0.6)<br/>+0.5 Temporal Multi-modal Co-occurrence Bonus"]:::processStyle
+        SortCands["Sort All Candidates by Final Score Descending"]:::processStyle
+        TemporalNMS["Temporal Non-Maximum Suppression (t-NMS):<br/>Suppresses Lower-Scoring Evidence if Time Overlap > 0.80"]:::processStyle
+        SuffGate{"Sufficiency Gate<br/>Top Score >= gamma?"}:::decisionStyle
+        FallbackExpand["Query Expansion & Dynamic K Fallback<br/>(Broadens Retrieval Windows)"]:::processStyle
+
+        SeqExpand --> Reranker --> BonusCalc --> SortCands --> TemporalNMS --> SuffGate
+        SuffGate -- Insufficient Score --> FallbackExpand
+        FallbackExpand --> DepthAlloc
+    end
+
+    subgraph Stage3Generation ["5. Stage 3 Grounded Generation (NO OLLAMA)"]
+        AssembleContext["Assemble Chronological Evidence Context:<br/>[Visual - t_s to t_e] Structured Captions & Notes<br/>[Speech - t_s to t_e] Transcribed Utterances<br/>[Sound - t_s to t_e] Sound Events & Spatial Side<br/>[Visual] Video-Level Unique Entity Counts"]:::stage3Style
+        NativeVLM["Native Qwen2.5-VL-3B-Instruct Model<br/>(Loaded in PyTorch on CPU/CUDA, Zero Ollama Calls)"]:::stage3Style
+        SharedCache["Class-Level Singleton Model Cache<br/>(Generator._shared_model reuses weights)"]:::stage3Style
+        ReasonRules["Strict Benchmark QA Reasoning Directives:<br/>1. Short direct answer (1 to 5 words)<br/>2. Spatial left/right sound source routing<br/>3. Strict Yes/No binary verification<br/>4. Anti-double-counting unique entity rule<br/>5. Never output Unknown"]:::stage3Style
+        CleanAnswer["Answer Post-Processing Normalizer:<br/>- Strips conversational prefixes<br/>- Converts number words ('two' -> '2')<br/>- Normalizes spatial and location labels"]:::stage3Style
+        FinalResult["Final Grounded Answer Output<br/>(Benchmarked 1-to-5 Word Response)"]:::outputStyle
+
+        SuffGate -- Sufficient Evidence --> AssembleContext
+        AssembleContext --> NativeVLM
+        SharedCache -.-> NativeVLM
+        ReasonRules --> NativeVLM
+        NativeVLM --> CleanAnswer --> FinalResult
+    end

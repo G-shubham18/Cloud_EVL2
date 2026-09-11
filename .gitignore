@@ -1,0 +1,54 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Large Media & Video Datasets (exceeds GitHub limits)
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.webm
+*.flv
+dataset/
+smoketest/videos/
+
+# Runtime Data & Vector Stores
+data/
+*.faiss
+*.index
+*.sqlite3
+chroma.sqlite3
+
+# Output & Prediction artifacts
+output/
+output_*/
+*.zip
+*.tar.gz
+
+# Environment & API keys
+.env
+*.key
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+out.txt
+mermaid.txt
+abcd.py
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Logs & caches
+*.log
+.pytest_cache/
+

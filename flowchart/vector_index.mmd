@@ -1,0 +1,58 @@
+﻿flowchart TD
+    %% Styling Classes
+    classDef inputStyle fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1;
+    classDef processStyle fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
+    classDef modelStyle fill:#ede7f6,stroke:#512da8,stroke-width:2px,color:#311b92;
+    classDef dbStyle fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#bf360c;
+    classDef decisionStyle fill:#fffde7,stroke:#fbc02d,stroke-width:2px,color:#f57f17;
+    classDef outputStyle fill:#e0f2f1,stroke:#00695c,stroke-width:2px,color:#004d40;
+
+    subgraph Inputs ["1. Extracted Multimodal Facts Input"]
+        AudioIn["Audio Facts & Segments<br/>(Speech Transcripts + Sound Events)"]:::inputStyle
+        VisualIn["Visual Facts & Keyframe Descriptions<br/>(Structured Captions, Tracking, Unique Counts)"]:::inputStyle
+        VideoPath["Video Absolute Path & Filename"]:::inputStyle
+    end
+
+    subgraph HashIsolation ["2. Video Store Directory Hash-Isolation"]
+        MD5Calc["Compute 8-character MD5 Path Hash:<br/>path_hash = MD5(abs_path)[:8]<br/>folder_name = {safe_stem}_{path_hash}"]:::processStyle
+        StoreDir["Isolated Video Store Path:<br/>data/vector_stores/{video_id}_{hash}/"]:::processStyle
+        CheckDisk{"is_video_indexed_on_disk?<br/>(Check indexed_video.json)"}:::decisionStyle
+        SkipIngest["Skip Stage 1 Ingestion<br/>(0.00s Instant Disk-Cache Reuse)"]:::outputStyle
+        ProceedIndex["Proceed with Indexing"]:::processStyle
+
+        VideoPath --> MD5Calc --> StoreDir --> CheckDisk
+        CheckDisk -- Indexed --> SkipIngest
+        CheckDisk -- Missing/Forced --> ProceedIndex
+    end
+
+    subgraph AudioStoreIndexing ["3. Audio Vector Indexing (ChromaDB)"]
+        CLAPEmbed["LAION-CLAP Text Embedder<br/>(laion/clap-htsat-unfused)<br/>Generates Audio Semantic Text Embeddings"]:::modelStyle
+        ChromaClient["ChromaDB Persistent Client<br/>(data/vector_stores/{id}/chroma/)"]:::dbStyle
+        AudioCollection[("ChromaDB Collection: 'audio_collection'<br/>- Documents: Speech & Sound texts<br/>- Embeddings: CLAP 512-dim vectors<br/>- Metadata: type, start_time, end_time, score")]:::dbStyle
+
+        ProceedIndex --> AudioIn
+        AudioIn --> CLAPEmbed --> AudioCollection
+        ChromaClient --> AudioCollection
+    end
+
+    subgraph VisualStoreIndexing ["4. Visual Vector Indexing (FAISS / Pure-NumPy Fallback)"]
+        MiniLMEmbed["Dense Semantic Text Embedder<br/>(sentence-transformers/all-MiniLM-L6-v2)<br/>Normalized 384-dim Embeddings"]:::modelStyle
+        IndexChoice{"FAISS Available?<br/>(Check OS / AppLocker Policy)"}:::decisionStyle
+        FaissIndex["faiss.IndexFlatIP(384)<br/>(C++ Accelerated Inner Product)"]:::processStyle
+        NumpyFallback["NumpyIndexFlatIP(384)<br/>(Pure-NumPy Vectorized Cosine Search Fallback)"]:::processStyle
+        VisualStorage[("Visual Index & Metadata Persistence:<br/>- visual_index.faiss (or .faiss.npy)<br/>- visual_metadata.json<br/>- tracking_metadata.json")]:::dbStyle
+
+        ProceedIndex --> VisualIn
+        VisualIn --> MiniLMEmbed --> IndexChoice
+        IndexChoice -- Available --> FaissIndex --> VisualStorage
+        IndexChoice -- Blocked by DLL Policy --> NumpyFallback --> VisualStorage
+    end
+
+    subgraph RecordPersistence ["5. Video Index Manifest Persistence"]
+        WriteManifest["Write indexed_video.json:<br/>{'video_path': abs_video_path}"]:::processStyle
+        ReadySignal["Stage 1 Vector Stores Complete & Ready for Online Stage 2 Retrieval"]:::outputStyle
+
+        AudioCollection --> WriteManifest
+        VisualStorage --> WriteManifest
+        WriteManifest --> ReadySignal
+    end

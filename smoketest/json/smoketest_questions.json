@@ -1,0 +1,245 @@
+[
+  {
+    "id": 1,
+    "dataset": "activininetqa",
+    "category": "spatial",
+    "video_name": "v_pPt_fygNjtQ.mp4",
+    "question_id": "v_pPt_fygNjtQ_4",
+    "question": "what is behind the man in a purple clothes",
+    "answer": "shelf"
+  },
+  {
+    "id": 2,
+    "dataset": "activininetqa",
+    "category": "spatial",
+    "video_name": "v_96vBhCFBbQk.mp4",
+    "question_id": "v_96vBhCFBbQk_4",
+    "question": "what is behind the person in blue",
+    "answer": "table"
+  },
+  {
+    "id": 3,
+    "dataset": "activininetqa",
+    "category": "temporal",
+    "video_name": "v_Nb6AQxxrihA.mp4",
+    "question_id": "v_Nb6AQxxrihA_5",
+    "question": "what happened before drinking",
+    "answer": "drink drink"
+  },
+  {
+    "id": 4,
+    "dataset": "activininetqa",
+    "category": "temporal",
+    "video_name": "v_0q9yZPTBbus.mp4",
+    "question_id": "v_0q9yZPTBbus_5",
+    "question": "what happened to the person in white after he blew his hair",
+    "answer": "tie up hair"
+  },
+  {
+    "id": 5,
+    "dataset": "activininetqa",
+    "category": "spatiotemporal",
+    "video_name": "v_0eR57IP6paM.mp4",
+    "question_id": "v_0eR57IP6paM_5",
+    "question": "Is the chair moved from the right side of the frame to the left, or does it remain stationary?",
+    "answer": "moved from right to left"
+  },
+  {
+    "id": 6,
+    "dataset": "activininetqa",
+    "category": "spatiotemporal",
+    "video_name": "v_0eR57IP6paM.mp4",
+    "question_id": "v_0eR57IP6paM_7",
+    "question": "Does the person's shadow move across the floor as they transition between quadrants?",
+    "answer": "yes"
+  },
+  {
+    "id": 7,
+    "dataset": "activininetqa",
+    "category": "audio",
+    "video_name": "v_0eR57IP6paM.mp4",
+    "question_id": "v_0eR57IP6paM_8",
+    "question": "What distinct sound event occurs simultaneously with the person reaching for the high shelf?",
+    "answer": "metallic scraping sound"
+  },
+  {
+    "id": 8,
+    "dataset": "activininetqa",
+    "category": "audio",
+    "video_name": "v_0eR57IP6paM.mp4",
+    "question_id": "v_0eR57IP6paM_9",
+    "question": "Is there a sudden change in background noise volume when the door is opened?",
+    "answer": "yes, volume increases"
+  },
+  {
+    "id": 9,
+    "dataset": "activininetqa",
+    "category": "counting",
+    "video_name": "v_FKtYeu2bJpA.mp4",
+    "question_id": "v_FKtYeu2bJpA_8",
+    "question": "how many chairs are there in video",
+    "answer": "3"
+  },
+  {
+    "id": 10,
+    "dataset": "activininetqa",
+    "category": "counting",
+    "video_name": "v_96vBhCFBbQk.mp4",
+    "question_id": "v_96vBhCFBbQk_8",
+    "question": "how many people are there in video",
+    "answer": "1"
+  },
+  {
+    "id": 11,
+    "dataset": "moviechat",
+    "category": "temporal",
+    "video_name": "10.mp4",
+    "question_id": "mc_11",
+    "question": "Does the ballroom dance and letter-reading sequence take place in a historical era or in modern times?",
+    "answer": "A historical era — the caption describes classical 18th-century English attire and customs."
+  },
+  {
+    "id": 12,
+    "dataset": "moviechat",
+    "category": "temporal",
+    "video_name": "11.mp4",
+    "question_id": "mc_12",
+    "question": "In what order do the night conversation, the church sermon, and the rainy day occur?",
+    "answer": "First the night conversation, then dawn breaks for the church sermon, and finally the rainy day arrives."
+  },
+  {
+    "id": 13,
+    "dataset": "moviechat",
+    "category": "spatial",
+    "video_name": "10.mp4",
+    "question_id": "mc_13",
+    "question": "Where does the family gather for their meal the day after the ball?",
+    "answer": "In the dining room."
+  },
+  {
+    "id": 14,
+    "dataset": "moviechat",
+    "category": "spatial",
+    "video_name": "11.mp4",
+    "question_id": "mc_14",
+    "question": "In what type of building does the pastor deliver his sermon?",
+    "answer": "Inside a church."
+  },
+  {
+    "id": 15,
+    "dataset": "moviechat",
+    "category": "counting",
+    "video_name": "12.mp4",
+    "question_id": "mc_15",
+    "question": "How many women take part in the living room conversation?",
+    "answer": "Two."
+  },
+  {
+    "id": 16,
+    "dataset": "moviechat",
+    "category": "counting",
+    "video_name": "100.mp4",
+    "question_id": "mc_16",
+    "question": "How many distinctly colored dresses are mentioned among the women at the estate?",
+    "answer": "Two — a lady in white and a lady in blue."
+  },
+  {
+    "id": 17,
+    "dataset": "moviechat",
+    "category": "spatiotemporal",
+    "video_name": "10.mp4",
+    "question_id": "mc_17",
+    "question": "In what setting and era does the family gather for their meal the day after the ball?",
+    "answer": "In the dining room, during a historical (18th-century English) era."
+  },
+  {
+    "id": 18,
+    "dataset": "moviechat",
+    "category": "spatiotemporal",
+    "video_name": "11.mp4",
+    "question_id": "mc_18",
+    "question": "Where does the pastor deliver his sermon, and does this happen at dawn or at night?",
+    "answer": "Inside a church, at dawn."
+  },
+  {
+    "id": 19,
+    "dataset": "moviechat",
+    "category": "audio",
+    "video_name": "10.mp4",
+    "question_id": "mc_19",
+    "question": "Given the ballroom dancing scene, is music most likely playing?",
+    "answer": "Yes, likely, given the dancing at the ball."
+  },
+  {
+    "id": 20,
+    "dataset": "moviechat",
+    "category": "audio",
+    "video_name": "11.mp4",
+    "question_id": "mc_20",
+    "question": "Would the pastor's sermon likely involve spoken dialogue rather than silence?",
+    "answer": "Yes, likely spoken preaching/dialogue."
+  },
+  {
+    "id": 21,
+    "dataset": "musicAVQA",
+    "category": "spatial",
+    "video_name": "nJq8o814oY0.mp4",
+    "question_id": "nJq8o814oY0_1",
+    "question": "Where is the performance?",
+    "answer": "outdoor"
+  },
+  {
+    "id": 22,
+    "dataset": "musicAVQA",
+    "category": "spatial",
+    "video_name": "zuSWPYdVhAs.mp4",
+    "question_id": "zuSWPYdVhAs_5",
+    "question": "Where is the performance?",
+    "answer": "outdoor"
+  },
+  {
+    "id": 23,
+    "dataset": "musicAVQA",
+    "category": "temporal",
+    "video_name": "OmHmobUOB1I.mp4",
+    "question_id": "OmHmobUOB1I_2",
+    "question": "How Long is the performance?",
+    "answer": "less than 10 minutes"
+  },
+  {
+    "id": 24,
+    "dataset": "musicAVQA",
+    "category": "spatiotemporal",
+    "video_name": "u9yiswwScL4.mp4",
+    "question_id": "u9yiswwScL4_3",
+    "question": "Which <Object> makes the sound <FL>?",
+    "answer": "left"
+  },
+  {
+    "id": 25,
+    "dataset": "musicAVQA",
+    "category": "spatiotemporal",
+    "video_name": "_GBd-M5tUss.mp4",
+    "question_id": "_GBd-M5tUss_6",
+    "question": "Which <Object> makes the sound <FL>?",
+    "answer": "right"
+  },
+  {
+    "id": 26,
+    "dataset": "musicAVQA",
+    "category": "counting",
+    "video_name": "MONDIK1KMbg.mp4",
+    "question_id": "MONDIK1KMbg_4",
+    "question": "Is there a <Object> in the entire video?",
+    "answer": "no"
+  },
+  {
+    "id": 27,
+    "dataset": "musicAVQA",
+    "category": "counting",
+    "video_name": "iINDBPYVruo.mp4",
+    "question_id": "iINDBPYVruo_7",
+    "question": "How many instruments are sounding in the video?",
+    "answer": "four"
+  }
+]

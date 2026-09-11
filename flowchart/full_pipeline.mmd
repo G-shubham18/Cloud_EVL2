@@ -1,0 +1,96 @@
+﻿flowchart TD
+    %% Styling Classes
+    classDef inputStyle fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1;
+    classDef stage1Style fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
+    classDef dbStyle fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#bf360c;
+    classDef stage2Style fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#4a148c;
+    classDef stage3Style fill:#fbe9e7,stroke:#d84315,stroke-width:2px,color:#bf360c;
+    classDef outputStyle fill:#e0f2f1,stroke:#00695c,stroke-width:2px,color:#004d40;
+    classDef gateStyle fill:#fffde7,stroke:#fbc02d,stroke-width:2px,color:#f57f17;
+
+    subgraph Inputs ["Input Layer"]
+        V["Raw Video File<br/>(MP4 / MKV / WEBM / AVI / MOV / 3GP)"]:::inputStyle
+        Q["User Question / Query q<br/>(Natural Language)"]:::inputStyle
+    end
+
+    subgraph Stage1 ["Stage 1: Decoupled Offline Extraction & Vector Indexing"]
+        direction TB
+        subgraph AudioBranch ["1A. Audio Processing Branch"]
+            direction TB
+            FFmpeg["FFmpeg Audio Demuxer<br/>(16kHz Mono WAV)"]:::stage1Style
+            ChunkAudio["Fixed 3.0s Audio Chaining<br/>(1.0s Overlap, RMS Energy Check)"]:::stage1Style
+            Whisper["Faster-Whisper (large-v3)<br/>ASR Speech Transcription"]:::stage1Style
+            MuteSpeech["Speech Muting / Suppression<br/>(Isolate Background Audio)"]:::stage1Style
+            CLAP_Tag["LAION-CLAP (clap-htsat-unfused)<br/>50-Class Zero-Shot SED"]:::stage1Style
+            StereoBal["Stereo Energy Balance Ratio<br/>(Left vs Right Source Localization)"]:::stage1Style
+            AudioFacts["Audio Facts Timeline<br/>(Speech + Spatial Sound Events)"]:::stage1Style
+
+            FFmpeg --> ChunkAudio --> Whisper --> MuteSpeech --> CLAP_Tag --> StereoBal --> AudioFacts
+        end
+
+        subgraph VisualBranch ["1B. Visual Processing Branch (16-Step Pipeline)"]
+            direction TB
+            HSVDiff["Consecutive Frame HSV Difference<br/>(Visual Change Score Calculation)"]:::stage1Style
+            SceneCut["Scene Change Detection<br/>(Strict Threshold = 30.0)"]:::stage1Style
+            AnchorSelect["Candidate Collection<br/>(Anchor Frame 0 + Scene Cuts)"]:::stage1Style
+            GroundingDINO["Grounding DINO Object Detector<br/>(Zero-Shot Open-Vocabulary Detection)"]:::stage1Style
+            IoUMerge["IoU Overlap Resolution (IoU > 0.45)<br/>(Physical Person & Object Counts)"]:::stage1Style
+            QualityCheck["Multi-Metric Quality Evaluation<br/>(Laplacian Sharpness, Brightness, Contrast)"]:::stage1Style
+            CLIPDedupe["CLIP ViT Embeddings + Cosine Similarity<br/>(Prune Redundant Frames > 0.90)"]:::stage1Style
+            AdaptiveKeyframes["Adaptive Keyframes Retention<br/>(Keep ALL Unique Frames)"]:::stage1Style
+            QwenVL["Qwen2.5-VL-3B-Instruct<br/>(Structured Scene Captioning A-G)"]:::stage1Style
+            PersonTrack["Multi-Feature Person Tracking<br/>(Authoritative DINO Boxes + Clothing Colors + Trajectory)"]:::stage1Style
+            UniqueCountCalc["Video-Level Unique Counting<br/>(Persistent IDs: person_001, person_002)"]:::stage1Style
+            TempDiff["Temporal Scene Notes & Action Analysis<br/>(Deterministic Structured Semantic Diffing)"]:::stage1Style
+            VisualFacts["Visual Facts Timeline + Summary Facts<br/>(Save Keyframes + Complete Metadata)"]:::stage1Style
+
+            HSVDiff --> SceneCut --> AnchorSelect --> GroundingDINO --> IoUMerge --> QualityCheck --> CLIPDedupe --> AdaptiveKeyframes --> QwenVL --> PersonTrack --> UniqueCountCalc --> TempDiff --> VisualFacts
+        end
+    end
+
+    subgraph VectorStores ["Decoupled Hash-Isolated Vector Stores"]
+        direction LR
+        ChromaDB[("Audio Store<br/>ChromaDB Collection<br/>(CLAP Text Embeddings)")]:::dbStyle
+        FAISS[("Visual Store<br/>FAISS FlatIP Index / NumPy Fallback<br/>(384-dim all-MiniLM-L6-v2)")]:::dbStyle
+    end
+
+    subgraph Stage2 ["Stage 2: Online Dynamic Retrieval & Re-ranking"]
+        direction TB
+        QC["Question Classifier (all-MiniLM-L6-v2)<br/>Computes Modality Weight beta(q) in [0.0, 1.0]"]:::stage2Style
+        DepthAlloc["Dynamic Depth Allocation<br/>K_a = round(K * beta), K_v = K - K_a"]:::stage2Style
+        DecoupledSearch["Decoupled Parallel Retrieval<br/>(ChromaDB Audio + FAISS Visual)"]:::stage2Style
+        QueryBoost["Dynamic Lexical & Counting Boost<br/>(+0.30 Lexical, +0.35 Unique Count)"]:::stage2Style
+        SeqExpand["Temporal Sequence Expansion<br/>(Adjacent Chronological Facts t-1, t+1)"]:::stage2Style
+        Reranker["Cross-Encoder Re-Ranker<br/>(BAAI/bge-reranker-large)"]:::stage2Style
+        TempNMS["Temporal NMS Deduplication<br/>(Overlap Threshold = 0.80)"]:::stage2Style
+        SuffGate{"Sufficiency Gate<br/>Score >= gamma?"}:::gateStyle
+
+        QC --> DepthAlloc --> DecoupledSearch --> QueryBoost --> SeqExpand --> Reranker --> TempNMS --> SuffGate
+    end
+
+    subgraph Stage3 ["Stage 3: Grounded Answer Generation (NO OLLAMA)"]
+        direction TB
+        ContextBuild["Chronological Multimodal Context Builder<br/>[Visual, Speech, Sound, Unique Counts]"]:::stage3Style
+        NativeQwen["Native Qwen2.5-VL-3B-Instruct Engine<br/>(PyTorch CPU/CUDA, Zero-Ollama Inference)"]:::stage3Style
+        ModelCache["Class-Level Singleton Model Caching<br/>(Shared Weights with VisualExtractor)"]:::stage3Style
+        PromptRules["6 Benchmark Reasoning Rules<br/>(1-5 Word Direct Answers, Left/Right, Yes/No)"]:::stage3Style
+        PostClean["Answer Post-Processing & Normalization<br/>(Number words 'two'->'2', spatial routing)"]:::stage3Style
+        FinalAns["Final Answer Output<br/>(Concise, Grounded, Benchmark-Aligned)"]:::outputStyle
+
+        ContextBuild --> NativeQwen
+        ModelCache -.-> NativeQwen
+        PromptRules --> NativeQwen --> PostClean --> FinalAns
+    end
+
+    %% Pipeline Interconnections
+    V --> AudioBranch
+    V --> VisualBranch
+    AudioFacts --> ChromaDB
+    VisualFacts --> FAISS
+
+    Q --> QC
+    ChromaDB --> DecoupledSearch
+    FAISS --> DecoupledSearch
+
+    SuffGate -- YES --> ContextBuild
+    SuffGate -- NO (Fallback) --> DepthAlloc

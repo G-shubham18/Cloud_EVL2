@@ -1,0 +1,14 @@
+faster-whisper
+torch
+transformers
+scenedetect
+chromadb
+faiss-cpu
+sentence-transformers
+# ollama (optional, no longer required - pipeline uses native Qwen2.5-VL)
+ffmpeg-python
+qwen-vl-utils
+accelerate
+numpy
+librosa
+imageio-ffmpeg
