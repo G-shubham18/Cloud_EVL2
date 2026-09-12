@@ -8,7 +8,7 @@ Architecture Pipeline (Exact 16-Step Sequential Execution):
   1. INPUT VIDEO: Open video stream and inspect stream metadata.
   2. READ VIDEO FRAMES: Read video frames consecutively at native frame rate.
   3. CALCULATE VISUAL CHANGE SCORE: Fast HSV pixel difference between frame (t-1) and frame (t).
-  4. COMPARE CHANGE SCORE WITH THRESHOLD = 30.0: Strict fixed boundary detection.
+  4. COMPARE CHANGE SCORE WITH THRESHOLD = 18.0: Strict fixed boundary detection.
   5. SCENE CHANGE DETECTED: Collect scene-change candidate frames (anchor frame 0 + scene cuts).
   6. RUN GROUNDING DINO ON SCENE-CHANGE FRAMES: Zero-shot open-vocabulary detection of
      persons, faces, furniture, instruments, vehicles, and key objects.
@@ -86,8 +86,8 @@ try:
 except ImportError:
     GROUNDING_DINO_MODEL = "IDEA-Research/grounding-dino-tiny"
 
-# Consecutive-frame visual change score threshold (default 25.0, imported from config)
-SCENE_THRESHOLD = getattr(config, "SCENE_THRESHOLD", 25.0)
+# Consecutive-frame visual change score threshold (default 18.0, imported from config)
+SCENE_THRESHOLD = getattr(config, "SCENE_THRESHOLD", 18.0)
 
 # Dynamic imports for Vision-Language and Zero-Shot Object Detection models
 try:
@@ -1083,7 +1083,7 @@ class CrossFrameEntityTracker:
 class VisualExtractor:
     """
     Main Visual Extractor implementing the exact 16-step architecture:
-    Consecutive frame difference -> Scene cut threshold = 30 -> Grounding DINO ->
+    Consecutive frame difference -> Scene cut threshold = 18 -> Grounding DINO ->
     Multi-Feature Person Tracking -> Quality Check -> CLIP Deduplication ->
     Adaptive Keyframe Retention -> Qwen VLM Captioning -> Temporal Notes -> Save Output.
     """
@@ -1267,8 +1267,8 @@ class VisualExtractor:
         score = float(np.mean(diff) * (100.0 / 255.0))
         return score
 
-    def detect_scene_changes(self, video_path: str, threshold: float = 30.0):
-        """Steps 1, 2, 4, 5: Consecutive-frame scene cut detection using fixed threshold = 30.0."""
+    def detect_scene_changes(self, video_path: str, threshold: float = SCENE_THRESHOLD):
+        """Steps 1, 2, 4, 5: Consecutive-frame scene cut detection using fixed threshold = 18.0."""
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
@@ -1647,7 +1647,7 @@ class VisualExtractor:
 
         scene_det_block = scene_detection_metadata if scene_detection_metadata is not None else getattr(self, "latest_scene_detection", {
             "method": "consecutive_frame_visual_change",
-            "threshold": 30,
+            "threshold": self.scene_threshold,
             "scene_changes_detected": []
         })
 

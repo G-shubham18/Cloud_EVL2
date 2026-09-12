@@ -1,4 +1,4 @@
-﻿flowchart TD
+flowchart TD
     %% Styling Classes
     classDef inputStyle fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1;
     classDef stage1Style fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
@@ -31,7 +31,7 @@
         subgraph VisualBranch ["1B. Visual Processing Branch (16-Step Pipeline)"]
             direction TB
             HSVDiff["Consecutive Frame HSV Difference<br/>(Visual Change Score Calculation)"]:::stage1Style
-            SceneCut["Scene Change Detection<br/>(Strict Threshold = 30.0)"]:::stage1Style
+            SceneCut["Scene Change Detection<br/>(Strict Threshold = 18.0)"]:::stage1Style
             AnchorSelect["Candidate Collection<br/>(Anchor Frame 0 + Scene Cuts)"]:::stage1Style
             GroundingDINO["Grounding DINO Object Detector<br/>(Zero-Shot Open-Vocabulary Detection)"]:::stage1Style
             IoUMerge["IoU Overlap Resolution (IoU > 0.45)<br/>(Physical Person & Object Counts)"]:::stage1Style

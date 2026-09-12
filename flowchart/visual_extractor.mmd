@@ -1,4 +1,4 @@
-﻿flowchart TD
+flowchart TD
     %% Styling Classes
     classDef stepStyle fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
     classDef decisionStyle fill:#fffde7,stroke:#fbc02d,stroke-width:2px,color:#f57f17;
@@ -14,7 +14,7 @@
 
     subgraph SceneDetection ["2. Consecutive-Frame Visual Change Detection"]
         S3["Step 3: Calculate Visual Change Score<br/>Score = Delta_H + Delta_S + Delta_V (HSV Diff)"]:::stepStyle
-        S4{"Step 4: Change Score >= 30.0?"}:::decisionStyle
+        S4{"Step 4: Change Score >= 18.0?"}:::decisionStyle
         S5A["Step 5: Scene Change Detected!<br/>Collect Frame as Candidate Keyframe"]:::stepStyle
         S5B["No Boundary: Continue to Next Frame"]:::stepStyle
         Anchor["Anchor Selection: Always Retain Frame 0 @ 0.00s"]:::stepStyle

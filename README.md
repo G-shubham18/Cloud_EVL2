@@ -249,7 +249,7 @@ flowchart TD
         AB --> CLAP["LAION-CLAP Zero-Shot Event Tagging & Stereo Localization"]
         Whisper & CLAP --> Chroma[("Audio Store Â - ChromaDB")]
 
-        VB --> SceneDiff["HSV Visual Change Score (Threshold = 30.0)"]
+        VB --> SceneDiff["HSV Visual Change Score (Threshold = 18.0)"]
         SceneDiff --> DINO["Grounding DINO Object Detection & IoU Merging"]
         DINO --> QualityEval["Image Quality Evaluation (Sharpness, Brightness, Contrast)"]
         QualityEval --> CLIPFilter["CLIP Cosine Redundancy Filter (> 0.90)"]
@@ -345,7 +345,7 @@ All settings, thresholds, and model parameters can be tuned directly in `config.
   - `GROUNDING_DINO_MODEL`: `"IDEA-Research/grounding-dino-tiny"`
   - `GENERATOR_MODEL`: `"Qwen/Qwen2.5-VL-3B-Instruct"` (Native PyTorch inference; No Ollama required)
   - `GENERATOR_MAX_NEW_TOKENS`: `32`
-  - `SCENE_THRESHOLD`: `25.0` (Consecutive-frame HSV visual change threshold)
+  - `SCENE_THRESHOLD`: `18.0` (Consecutive-frame HSV visual change threshold)
 - **Retrieval & Reranking Hyperparameters**:
   - `KA_DEFAULT`: `5` (Default audio top-$k$ depth)
   - `KV_DEFAULT`: `10` (Default visual top-$k$ depth)

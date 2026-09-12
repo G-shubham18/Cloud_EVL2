@@ -135,7 +135,7 @@ AUDIO_RMS_THRESHOLD = 0.001 # RMS energy threshold to skip silent/low-energy chu
 STEREO_BALANCE_THRESHOLD = 0.15 # Energy ratio threshold for Left vs Right channel sound source localization
 
 # Visual Extraction Configurations
-SCENE_THRESHOLD = 25.0 # Consecutive-frame visual change score threshold
+SCENE_THRESHOLD = 18.0 # Consecutive-frame visual change score threshold
 GROUNDING_DINO_MODEL = "IDEA-Research/grounding-dino-tiny"
 MAX_SCENE_WINDOW_SEC = 4.0 # Maximum time window per keyframe segment to capture intra-scene actions
 CLIP_BATCH_SIZE = 32 if IS_GPU else 8 # Batch size for CLIP image embedding generation
