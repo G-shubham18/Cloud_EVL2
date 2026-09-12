@@ -15,8 +15,8 @@ flowchart TD
     subgraph SceneDetection ["2. Consecutive-Frame Visual Change Detection"]
         S3["Step 3: Calculate Visual Change Score<br/>Score = Delta_H + Delta_S + Delta_V (HSV Diff)"]:::stepStyle
         S4{"Step 4: Change Score >= 18.0?"}:::decisionStyle
-        S5A["Step 5: Scene Change Detected!<br/>Collect Frame as Candidate Keyframe"]:::stepStyle
-        S5B["No Boundary: Continue to Next Frame"]:::stepStyle
+        S5A["Step 5: Scene Cut Detected!<br/>Log Scene Cut & Collect Candidate Frame"]:::stepStyle
+        S5B["Same Scene: Silently Process Next Frame<br/>(No Verbose Console Logging)"]:::stepStyle
         Anchor["Anchor Selection: Always Retain Frame 0 @ 0.00s"]:::stepStyle
 
         S2 --> S3 --> S4
@@ -50,9 +50,9 @@ flowchart TD
         S11 -- NO --> S12
     end
 
-    subgraph VLMCaptioning ["5. Structured Multimodal Scene Captioning"]
-        S13["Step 13: Structured VLM Scene Captioning<br/>(Qwen/Qwen2.5-VL-3B-Instruct)"]:::modelStyle
-        Sections["7 Structured Sections Generated:<br/>Section A: Scene Summary & Key Activity<br/>Section B: People, Attire & Appearance<br/>Section C: Objects, Furniture & Spatial Positions<br/>Section D: Actions, Hand Movements & Trajectories<br/>Section E: Visible Text, Labels & Symbols<br/>Section F: Environment, Lighting & Camera View<br/>Section G: Frame-Level Entity Counts"]:::stepStyle
+    subgraph VLMCaptioning ["5. Modular Visual Captioning Engine"]
+        S13["Step 13: Visual Scene Captioning<br/>(VisualCaptioner: BLIP Large [Default],<br/>BLIP Base, SmolVLM, Moondream, Qwen-VL)"]:::modelStyle
+        Sections["Caption Output:<br/>Dense Multimodal Scene Descriptions,<br/>Object Context, Appearance & Environmental Facts"]:::stepStyle
 
         S12 --> S13
         Sections --> S13

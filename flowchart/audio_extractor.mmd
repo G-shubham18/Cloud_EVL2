@@ -1,4 +1,4 @@
-﻿flowchart TD
+flowchart TD
     %% Styling Classes
     classDef inputStyle fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1;
     classDef processStyle fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
@@ -57,28 +57,12 @@
         ConfThresh -- YES --> MergeAdjacent
     end
 
-    subgraph SpatialAudio ["6. Stereo Source Localization (Left vs Right)"]
-        StereoExtract["Extract Stereo Channels from Original Audio<br/>(Channel Left: y_L, Channel Right: y_R)"]:::processStyle
-        EnergyBalance["Compute Stereo Energy Balance Ratio:<br/>Balance = (E_L - E_R) / (E_L + E_R)"]:::processStyle
-        DirectionGate{"Balance Value?"}:::decisionStyle
-        TagLeft["[Audio Source: Left Side]<br/>(Balance > +0.15)"]:::processStyle
-        TagRight["[Audio Source: Right Side]<br/>(Balance < -0.15)"]:::processStyle
-        TagCenter["[Audio Source: Center / Ambient]<br/>(-0.15 <= Balance <= +0.15)"]:::processStyle
-
-        MergeAdjacent --> StereoExtract --> EnergyBalance --> DirectionGate
-        DirectionGate -- Left --> TagLeft
-        DirectionGate -- Right --> TagRight
-        DirectionGate -- Center --> TagCenter
-    end
-
-    subgraph FinalAudioFacts ["7. Chronological Audio Facts Timeline"]
-        FormatSound["Create Sound Fact Record:<br/>[Sound - start_s to end_s] Label + Source Tag"]:::outputStyle
+    subgraph FinalAudioFacts ["6. Chronological Audio Facts Timeline"]
+        FormatSound["Create Sound Fact Record:<br/>[Sound - start_s to end_s] Sound of {label}"]:::outputStyle
         MergeFacts["Chronological Sort & Merge<br/>(Sorted by start_time ascending)"]:::outputStyle
         OutputTimeline["Final Audio Facts List<br/>(Passed to ChromaDB Vector Indexer)"]:::outputStyle
 
-        TagLeft --> FormatSound
-        TagRight --> FormatSound
-        TagCenter --> FormatSound
+        MergeAdjacent --> FormatSound
         SpeechRecord --> MergeFacts
         FormatSound --> MergeFacts
         MergeFacts --> OutputTimeline

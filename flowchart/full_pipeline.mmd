@@ -22,29 +22,28 @@ flowchart TD
             Whisper["Faster-Whisper (large-v3)<br/>ASR Speech Transcription"]:::stage1Style
             MuteSpeech["Speech Muting / Suppression<br/>(Isolate Background Audio)"]:::stage1Style
             CLAP_Tag["LAION-CLAP (clap-htsat-unfused)<br/>50-Class Zero-Shot SED"]:::stage1Style
-            StereoBal["Stereo Energy Balance Ratio<br/>(Left vs Right Source Localization)"]:::stage1Style
-            AudioFacts["Audio Facts Timeline<br/>(Speech + Spatial Sound Events)"]:::stage1Style
+            AudioFacts["Audio Facts Timeline<br/>(Speech + Sound Events)"]:::stage1Style
 
-            FFmpeg --> ChunkAudio --> Whisper --> MuteSpeech --> CLAP_Tag --> StereoBal --> AudioFacts
+            FFmpeg --> ChunkAudio --> Whisper --> MuteSpeech --> CLAP_Tag --> AudioFacts
         end
 
         subgraph VisualBranch ["1B. Visual Processing Branch (16-Step Pipeline)"]
             direction TB
             HSVDiff["Consecutive Frame HSV Difference<br/>(Visual Change Score Calculation)"]:::stage1Style
-            SceneCut["Scene Change Detection<br/>(Strict Threshold = 18.0)"]:::stage1Style
+            SceneCut["Scene Change Detection<br/>(Log Cuts Only, Threshold = 18.0)"]:::stage1Style
             AnchorSelect["Candidate Collection<br/>(Anchor Frame 0 + Scene Cuts)"]:::stage1Style
             GroundingDINO["Grounding DINO Object Detector<br/>(Zero-Shot Open-Vocabulary Detection)"]:::stage1Style
             IoUMerge["IoU Overlap Resolution (IoU > 0.45)<br/>(Physical Person & Object Counts)"]:::stage1Style
             QualityCheck["Multi-Metric Quality Evaluation<br/>(Laplacian Sharpness, Brightness, Contrast)"]:::stage1Style
             CLIPDedupe["CLIP ViT Embeddings + Cosine Similarity<br/>(Prune Redundant Frames > 0.90)"]:::stage1Style
             AdaptiveKeyframes["Adaptive Keyframes Retention<br/>(Keep ALL Unique Frames)"]:::stage1Style
-            QwenVL["Qwen2.5-VL-3B-Instruct<br/>(Structured Scene Captioning A-G)"]:::stage1Style
+            VisualCaptioner["Visual Captioning Model<br/>(BLIP Large [Default], Base, SmolVLM, Moondream, Qwen-VL)"]:::stage1Style
             PersonTrack["Multi-Feature Person Tracking<br/>(Authoritative DINO Boxes + Clothing Colors + Trajectory)"]:::stage1Style
             UniqueCountCalc["Video-Level Unique Counting<br/>(Persistent IDs: person_001, person_002)"]:::stage1Style
             TempDiff["Temporal Scene Notes & Action Analysis<br/>(Deterministic Structured Semantic Diffing)"]:::stage1Style
             VisualFacts["Visual Facts Timeline + Summary Facts<br/>(Save Keyframes + Complete Metadata)"]:::stage1Style
 
-            HSVDiff --> SceneCut --> AnchorSelect --> GroundingDINO --> IoUMerge --> QualityCheck --> CLIPDedupe --> AdaptiveKeyframes --> QwenVL --> PersonTrack --> UniqueCountCalc --> TempDiff --> VisualFacts
+            HSVDiff --> SceneCut --> AnchorSelect --> GroundingDINO --> IoUMerge --> QualityCheck --> CLIPDedupe --> AdaptiveKeyframes --> VisualCaptioner --> PersonTrack --> UniqueCountCalc --> TempDiff --> VisualFacts
         end
     end
 
@@ -68,18 +67,18 @@ flowchart TD
         QC --> DepthAlloc --> DecoupledSearch --> QueryBoost --> SeqExpand --> Reranker --> TempNMS --> SuffGate
     end
 
-    subgraph Stage3 ["Stage 3: Grounded Answer Generation (NO OLLAMA)"]
+    subgraph Stage3 ["Stage 3: Grounded Answer Generation"]
         direction TB
         ContextBuild["Chronological Multimodal Context Builder<br/>[Visual, Speech, Sound, Unique Counts]"]:::stage3Style
-        NativeQwen["Native Qwen2.5-VL-3B-Instruct Engine<br/>(PyTorch CPU/CUDA, Zero-Ollama Inference)"]:::stage3Style
-        ModelCache["Class-Level Singleton Model Caching<br/>(Shared Weights with VisualExtractor)"]:::stage3Style
-        PromptRules["6 Benchmark Reasoning Rules<br/>(1-5 Word Direct Answers, Left/Right, Yes/No)"]:::stage3Style
-        PostClean["Answer Post-Processing & Normalization<br/>(Number words 'two'->'2', spatial routing)"]:::stage3Style
+        LLMEngine["LLM Generation Engine (Dual Backend: Auto / API / Local)<br/>qwen2.5-v1-72b-instruct (Default) / gemma-4-31b / phi-3.5-vision"]:::stage3Style
+        ModelCache["Class-Level Singleton Model Caching<br/>(Shared Model Weights / HF InferenceClient)"]:::stage3Style
+        PromptRules["Benchmark Reasoning Rules<br/>(1-5 Word Direct Answers, Benchmark-Aligned)"]:::stage3Style
+        PostClean["Answer Post-Processing & Normalization<br/>(Number words 'two'->'2', clean text)"]:::stage3Style
         FinalAns["Final Answer Output<br/>(Concise, Grounded, Benchmark-Aligned)"]:::outputStyle
 
-        ContextBuild --> NativeQwen
-        ModelCache -.-> NativeQwen
-        PromptRules --> NativeQwen --> PostClean --> FinalAns
+        ContextBuild --> LLMEngine
+        ModelCache -.-> LLMEngine
+        PromptRules --> LLMEngine --> PostClean --> FinalAns
     end
 
     %% Pipeline Interconnections
