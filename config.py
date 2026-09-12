@@ -1,4 +1,5 @@
 import os
+from typing import Optional, Dict, Any, List
 
 # Set Intel Level Zero device selector before torch import to target dedicated GPU and avoid oneDNN conflicts
 if "ONEAPI_DEVICE_SELECTOR" not in os.environ:
@@ -88,22 +89,193 @@ def empty_gpu_cache():
 print(f"[Hardware Setup] Pipeline Running in Dual Mode: {'GPU (' + str(DEVICE) + ')' if IS_GPU else 'CPU (Optimized Fallback Mode)'}")
 print(f"[Hardware Setup] Selected Data Type: {TORCH_DTYPE}")
 
-# Model Identifiers
-# Stage 1: Extraction & Indexing
+# ------------------------------------------------------------------------------
+# HUGGING FACE AUTHENTICATION & SECURE TOKEN MANAGEMENT
+# ------------------------------------------------------------------------------
+# The Hugging Face access token is securely loaded from environment variables.
+# It is NEVER hardcoded, and NEVER logged or printed to stdout/stderr.
+# Supported env vars: HF_TOKEN, HUGGING_FACE_HUB_TOKEN, HUGGINGFACE_TOKEN
+HF_TOKEN = (
+    os.environ.get("HF_TOKEN")
+    or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    or os.environ.get("HUGGINGFACE_TOKEN")
+)
+if HF_TOKEN:
+    HF_TOKEN = HF_TOKEN.strip()
+
+def get_hf_token() -> str:
+    """Returns the Hugging Face access token securely (or None if not set)."""
+    return HF_TOKEN
+
+def has_hf_token() -> bool:
+    """Returns True if a valid Hugging Face access token is present in the environment."""
+    return bool(HF_TOKEN)
+
+# ------------------------------------------------------------------------------
+# EXPERIMENTAL MODEL REGISTRY & CONFIGURATION
+# ------------------------------------------------------------------------------
+# Supported LLM Generators for experimentation:
+#   - qwen2.5-v1-72b-instruct (DEFAULT): Qwen 2.5 72B Instruct via HF API or multi-GPU
+#   - gemma-4-31b: Google Gemma 2 27B/31B Instruct
+#   - phi-3.5-vision-instruct: Microsoft Phi-3.5 Vision Instruct
+#   (Any arbitrary Hugging Face model repository ID is also accepted)
+SUPPORTED_LLM_GENERATORS = {
+    "qwen2.5-v1-72b-instruct": {
+        "primary_hf_id": "Qwen/Qwen2.5-VL-72B-Instruct",
+        "fallback_hf_id": "Qwen/Qwen2.5-72B-Instruct",
+        "type": "vision_llm",
+        "description": "Qwen2.5-VL 72B Instruct (Vision-Language & Text)",
+        "aliases": ["qwen2.5-v1-72b-instruct", "qwen2.5-vl-72b-instruct", "qwen2.5-72b-instruct", "qwen2.5-72b", "qwen-72b"]
+    },
+    "gemma-4-31b": {
+        "primary_hf_id": "google/gemma-2-27b-it",
+        "fallback_hf_id": "google/gemma-2-9b-it",
+        "type": "text_llm",
+        "description": "Google Gemma 2 27B/31B Instruct",
+        "aliases": ["gemma-4-31b", "gemma-2-27b-it", "gemma-2-27b", "gemma-31b", "gemma"]
+    },
+    "phi-3.5-vision-instruct": {
+        "primary_hf_id": "microsoft/Phi-3.5-vision-instruct",
+        "fallback_hf_id": "microsoft/Phi-3-vision-128k-instruct",
+        "type": "vision_llm",
+        "description": "Microsoft Phi-3.5 Vision Instruct",
+        "aliases": ["phi-3.5-vision-instruct", "phi-3.5-vision", "phi-3.5", "phi3.5"]
+    },
+    "qwen/qwen2.5-vl-3b-instruct": {
+        "primary_hf_id": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "fallback_hf_id": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "type": "vision_llm",
+        "description": "Qwen2.5-VL 3B Instruct (Lightweight Local VLM)",
+        "aliases": ["qwen/qwen2.5-vl-3b-instruct", "qwen2.5-vl-3b-instruct", "qwen2.5-vl-3b", "qwen-3b"]
+    }
+}
+
+# Supported Visual Captioning Models for experimentation:
+#   - Salesforce/blip-image-captioning-large (DEFAULT): SOTA dense image captioning
+#   - Salesforce/blip-image-captioning-base: Fast lightweight BLIP captioning
+#   - HuggingFaceTB/SmolVLM-256M-Instruct: Compact 256M parameter multimodal VLM
+#   - wraps/moondream-caption (or vikhyatk/moondream2): Efficient edge vision model
+#   (Any arbitrary Hugging Face model repository ID is also accepted)
+SUPPORTED_CAPTIONING_MODELS = {
+    "salesforce/blip-image-captioning-large": {
+        "hf_id": "Salesforce/blip-image-captioning-large",
+        "fallback_hf_id": "Salesforce/blip-image-captioning-base",
+        "architecture": "blip",
+        "description": "Salesforce BLIP Large Image Captioning",
+        "aliases": ["salesforce/blip-image-captioning-large", "blip-large", "blip"]
+    },
+    "salesforce/blip-image-captioning-base": {
+        "hf_id": "Salesforce/blip-image-captioning-base",
+        "fallback_hf_id": "Salesforce/blip-image-captioning-large",
+        "architecture": "blip",
+        "description": "Salesforce BLIP Base Image Captioning",
+        "aliases": ["salesforce/blip-image-captioning-base", "blip-base"]
+    },
+    "huggingfacetb/smolvlm-256m-instruct": {
+        "hf_id": "HuggingFaceTB/SmolVLM-256M-Instruct",
+        "fallback_hf_id": "Salesforce/blip-image-captioning-base",
+        "architecture": "smolvlm",
+        "description": "HuggingFaceTB SmolVLM 256M Instruct",
+        "aliases": ["huggingfacetb/smolvlm-256m-instruct", "smolvlm", "smolvlm-256m"]
+    },
+    "wraps/moondream-caption": {
+        "hf_id": "wraps/moondream-caption",
+        "fallback_hf_id": "vikhyatk/moondream2",
+        "architecture": "moondream",
+        "description": "Moondream Vision Captioning",
+        "aliases": ["wraps/moondream-caption", "moondream-caption", "moondream", "vikhyatk/moondream2"]
+    },
+    "qwen/qwen2.5-vl-3b-instruct": {
+        "hf_id": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "fallback_hf_id": "Salesforce/blip-image-captioning-large",
+        "architecture": "qwen_vl",
+        "description": "Qwen2.5-VL 3B Instruct Structured Captioning",
+        "aliases": ["qwen/qwen2.5-vl-3b-instruct", "qwen2.5-vl-3b", "qwen-vl"]
+    }
+}
+
+def resolve_generator_model(name: Optional[str] = None) -> dict:
+    """Resolves model name/alias to canonical HF repo ID and configuration."""
+    raw = (name or GENERATOR_MODEL).strip()
+    low = raw.lower()
+    for key, spec in SUPPORTED_LLM_GENERATORS.items():
+        if low == key.lower() or low in [a.lower() for a in spec.get("aliases", [])]:
+            return {
+                "name": key,
+                "hf_id": spec["primary_hf_id"],
+                "fallback_hf_id": spec.get("fallback_hf_id", spec["primary_hf_id"]),
+                "type": spec.get("type", "vision_llm"),
+                "description": spec.get("description", raw)
+            }
+    # Custom user-specified repository
+    return {
+        "name": raw,
+        "hf_id": raw,
+        "fallback_hf_id": raw,
+        "type": "auto",
+        "description": f"Custom model ({raw})"
+    }
+
+def resolve_captioning_model(name: Optional[str] = None) -> dict:
+    """Resolves captioning model name/alias to canonical HF repo ID and architecture."""
+    raw = (name or CAPTIONING_MODEL).strip()
+    low = raw.lower()
+    for key, spec in SUPPORTED_CAPTIONING_MODELS.items():
+        if low == key.lower() or low in [a.lower() for a in spec.get("aliases", [])]:
+            return {
+                "name": key,
+                "hf_id": spec["hf_id"],
+                "fallback_hf_id": spec.get("fallback_hf_id", spec["hf_id"]),
+                "architecture": spec.get("architecture", "blip"),
+                "description": spec.get("description", raw)
+            }
+    # Custom captioning model
+    arch = "blip" if "blip" in low else ("smolvlm" if "smol" in low else ("moondream" if "moondream" in low else "auto"))
+    return {
+        "name": raw,
+        "hf_id": raw,
+        "fallback_hf_id": raw,
+        "architecture": arch,
+        "description": f"Custom captioning model ({raw})"
+    }
+
+# Active Default Model Identifiers (Overridable via environment variables)
+# Default LLM Generator: qwen2.5-v1-72b-instruct
+GENERATOR_MODEL = os.environ.get(
+    "GENERATOR_MODEL",
+    os.environ.get("LLM_MODEL", "qwen2.5-v1-72b-instruct")
+)
+
+# Default Visual Captioning Model: Salesforce/blip-image-captioning-large
+CAPTIONING_MODEL = os.environ.get(
+    "CAPTIONING_MODEL",
+    os.environ.get("VLM_MODEL", "Salesforce/blip-image-captioning-large")
+)
+# Preserved for backward compatibility across pipeline
+QWEN_VL_MODEL = CAPTIONING_MODEL
+
+# Generator Execution Backend:
+#   - 'auto' (default): Automatically selects HF Serverless API for large models (>=20B)
+#                       or when local VRAM is limited; falls back to local PyTorch if offline.
+#   - 'api' or 'serverless': Uses Hugging Face Inference API with HF_TOKEN.
+#   - 'local': Uses local PyTorch / Transformers execution.
+GENERATOR_BACKEND = os.environ.get(
+    "GENERATOR_BACKEND",
+    os.environ.get("LLM_BACKEND", "auto")
+).lower().strip()
+
+# Stage 1: Extraction & Indexing Models
 WHISPER_MODEL = "large-v3"
 CLAP_MODEL = "laion/clap-htsat-unfused"
-QWEN_VL_MODEL = "Qwen/Qwen2.5-VL-3B-Instruct"
 CLIP_MODEL = "openai/clip-vit-base-patch32"
-TEXT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # Fast, highly accurate dense semantic text embedder for FAISS & ChromaDB
+TEXT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # Fast dense semantic embedder for FAISS & ChromaDB
 SIMILARITY_THRESHOLD = 0.90
 
 # Stage 2: Retrieval & Re-ranking
 MODALITY_ESTIMATOR_MODEL = "all-MiniLM-L6-v2"
 RERANKER_MODEL = "BAAI/bge-reranker-large"
 
-# Stage 3: Generation
-# Native Model Generation (Qwen2.5-VL-3B-Instruct, no Ollama required)
-GENERATOR_MODEL = QWEN_VL_MODEL
+# Stage 3: Generation Hyperparameters
 GENERATOR_MAX_NEW_TOKENS = 32
 GENERATOR_DEVICE = DEVICE
 

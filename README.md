@@ -332,18 +332,52 @@ flowchart TD
 
 All settings, thresholds, and model parameters can be tuned directly in `config.py`:
 
-- **Hardware Setup & Dual Mode**:
-  - Automatically detects **CUDA GPU**, **Intel XPU**, **DirectML**, or **CPU Fallback Mode**.
-  - In CPU mode, vision resolution bounds (`MIN_VISION_PIXELS`, `MAX_VISION_PIXELS`) and VLM token generation lengths (`VLM_MAX_NEW_TOKENS`) are automatically scaled to optimize speed.
+- **Experimental Models & Configuration**:
+  - **LLM Generators**:
+    - `qwen2.5-v1-72b-instruct` (**Default LLM**): High-capacity 72B reasoning model (runs via HF Serverless API or multi-GPU local).
+    - `gemma-4-31b`: Google Gemma 2 27B/31B Instruct model.
+    - `phi-3.5-vision-instruct`: Microsoft Phi-3.5 Vision multimodal model.
+    - *(Custom Hugging Face repo IDs or local weights are also supported)*
+  - **Visual Captioning Models**:
+    - `Salesforce/blip-image-captioning-large` (**Default Captioning**): High-quality scene descriptions.
+    - `Salesforce/blip-image-captioning-base`: Ultra-fast lightweight captioning.
+    - `HuggingFaceTB/SmolVLM-256M-Instruct`: Compact 256M parameter multimodal VLM.
+    - `wraps/moondream-caption`: Efficient edge vision model.
+  - **Hugging Face Authentication Token (`HF_TOKEN`)**:
+    - Load securely via environment variable:
+      ```bash
+      # Linux / macOS:
+      export HF_TOKEN="hf_your_actual_token_here"
+
+      # Windows PowerShell:
+      $env:HF_TOKEN="hf_your_actual_token_here"
+      ```
+    - The token is **never hardcoded** and **never exposed** in logs, stdout, or saved files.
+  - **Generation Backends (`GENERATOR_BACKEND`)**:
+    - `auto` (Default): Uses Hugging Face Serverless Inference API for large models (e.g. 72B, 31B) to run without requiring 140GB VRAM, falling back to local PyTorch when feasible.
+    - `api` / `serverless`: Always queries Hugging Face Inference API with `HF_TOKEN`.
+    - `local`: Runs models locally via PyTorch / Transformers.
+  - **Switching Models**:
+    - Via Environment Variables:
+      ```bash
+      export LLM_MODEL="gemma-4-31b"
+      export CAPTIONING_MODEL="HuggingFaceTB/SmolVLM-256M-Instruct"
+      export GENERATOR_BACKEND="auto"
+      ```
+    - Via CLI Flags:
+      ```bash
+      python main.py --llm_model gemma-4-31b --captioning_model Salesforce/blip-image-captioning-large --llm_backend auto
+      ```
+    - Or directly edit `GENERATOR_MODEL` and `CAPTIONING_MODEL` in `config.py`.
 - **Model Identifiers**:
+  - `GENERATOR_MODEL`: `"qwen2.5-v1-72b-instruct"` (Default)
+  - `CAPTIONING_MODEL`: `"Salesforce/blip-image-captioning-large"` (Default)
   - `WHISPER_MODEL`: `"large-v3"` (Runs in `float16` on CUDA, `int8` on CPU)
   - `CLAP_MODEL`: `"laion/clap-htsat-unfused"`
-  - `QWEN_VL_MODEL`: `"Qwen/Qwen2.5-VL-3B-Instruct"`
   - `CLIP_MODEL`: `"openai/clip-vit-base-patch32"`
   - `MODALITY_ESTIMATOR_MODEL`: `"all-MiniLM-L6-v2"`
   - `RERANKER_MODEL`: `"BAAI/bge-reranker-large"`
   - `GROUNDING_DINO_MODEL`: `"IDEA-Research/grounding-dino-tiny"`
-  - `GENERATOR_MODEL`: `"Qwen/Qwen2.5-VL-3B-Instruct"` (Native PyTorch inference; No Ollama required)
   - `GENERATOR_MAX_NEW_TOKENS`: `32`
   - `SCENE_THRESHOLD`: `18.0` (Consecutive-frame HSV visual change threshold)
 - **Retrieval & Reranking Hyperparameters**:

@@ -53,7 +53,10 @@ from sentence_transformers import SentenceTransformer
 # ------------------------------------------------------------------------------
 import config
 from config import (
+    CAPTIONING_MODEL,
     QWEN_VL_MODEL,
+    HF_TOKEN,
+    resolve_captioning_model,
     CLIP_MODEL,
     SIMILARITY_THRESHOLD,
     DEVICE,
@@ -1091,54 +1094,29 @@ class VisualExtractor:
     Multi-Feature Person Tracking -> Quality Check -> CLIP Deduplication ->
     Adaptive Keyframe Retention -> Qwen VLM Captioning -> Temporal Notes -> Save Output.
     """
-    def __init__(self, load_vlm: bool = True):
+    def __init__(self, load_vlm: bool = True, captioning_model: Optional[str] = None):
         self.load_vlm = load_vlm
+        self.captioning_model_name = captioning_model or CAPTIONING_MODEL
+        self.captioner = None
         self.model = None
         self.processor = None
 
         if load_vlm:
-            print(f"Loading Vision Model: {QWEN_VL_MODEL}")
-            kwargs = {
-                "torch_dtype": TORCH_DTYPE,
-                "device_map": "auto" if DEVICE == "cuda" else None,
-            }
-
-            if "2.5" in QWEN_VL_MODEL and Qwen2_5_VLForConditionalGeneration is not None:
+            from stage1_offline.captioning import VisualCaptioner
+            self.captioner = VisualCaptioner(
+                model_name=self.captioning_model_name,
+                device=DEVICE,
+                hf_token=HF_TOKEN
+            )
+            self.model = getattr(self.captioner, "model", None)
+            self.processor = getattr(self.captioner, "processor", None)
+            # Share with generator if it's a Qwen-VL model
+            if self.model is not None and self.processor is not None and "qwen" in self.captioning_model_name.lower():
                 try:
-                    self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-                        QWEN_VL_MODEL, **kwargs
-                    )
-                except Exception as e:
-                    print(f"Failed to load via Qwen2_5_VLForConditionalGeneration: {e}")
-
-            if self.model is None and AutoModelForImageTextToText is not None:
-                try:
-                    self.model = AutoModelForImageTextToText.from_pretrained(
-                        QWEN_VL_MODEL, **kwargs
-                    )
-                except Exception as e:
-                    print(f"Failed to load via AutoModelForImageTextToText: {e}")
-
-            if self.model is None and Qwen2VLForConditionalGeneration is not None:
-                try:
-                    self.model = Qwen2VLForConditionalGeneration.from_pretrained(
-                        QWEN_VL_MODEL, **kwargs
-                    )
-                except Exception as e:
-                    print(f"Failed to load via Qwen2VLForConditionalGeneration: {e}")
-
-            if self.model is None:
-                raise RuntimeError(f"Could not load vision model '{QWEN_VL_MODEL}'.")
-
-            if DEVICE != "cuda":
-                self.model = self.model.to(DEVICE)
-
-            self.processor = AutoProcessor.from_pretrained(QWEN_VL_MODEL)
-            try:
-                from stage3_generator.generator import Generator
-                Generator.set_shared_model(self.model, self.processor, DEVICE)
-            except Exception:
-                pass
+                    from stage3_generator.generator import Generator
+                    Generator.set_shared_model(self.model, self.processor, DEVICE)
+                except Exception:
+                    pass
 
         clip_device = DEVICE if IS_CUDA_AVAILABLE else "cpu"
         print(f"Loading CLIP Embedding Model: {CLIP_MODEL} on device={clip_device}")
@@ -1939,100 +1917,47 @@ class VisualExtractor:
     def generate_descriptions(
         self, keyframes: list, vlm_batch_size: int = VLM_BATCH_SIZE
     ):
-        """Step 13: Passes accepted keyframes to Vision Model in batches with structured visual prompt."""
+        """Step 13: Passes accepted keyframes to VisualCaptioner in batches."""
         if not keyframes:
             return []
 
         results = []
         num_keyframes = len(keyframes)
 
+        if self.captioner is None:
+            from stage1_offline.captioning import VisualCaptioner
+            self.captioner = VisualCaptioner(
+                model_name=self.captioning_model_name,
+                device=DEVICE,
+                hf_token=HF_TOKEN
+            )
+            self.model = getattr(self.captioner, "model", None)
+            self.processor = getattr(self.captioner, "processor", None)
+
         for i in range(0, num_keyframes, vlm_batch_size):
             batch_kfs = keyframes[i : i + vlm_batch_size]
             batch_end = min(i + vlm_batch_size, num_keyframes)
             print(
-                f"Generating VLM structured descriptions for keyframes {i+1}-{batch_end}/{num_keyframes} (batch_size={vlm_batch_size})..."
+                f"Generating visual captions for keyframes {i+1}-{batch_end}/{num_keyframes} using '{self.captioner.model_id}'..."
             )
 
-            batch_messages = []
-            for kf in batch_kfs:
-                img = kf["image"]
-                if max(img.size) > VLM_IMAGE_RESIZE_MAX:
-                    img_scaled = img.copy()
-                    img_scaled.thumbnail((VLM_IMAGE_RESIZE_MAX, VLM_IMAGE_RESIZE_MAX))
-                else:
-                    img_scaled = img
+            batch_images = [kf["image"] for kf in batch_kfs]
+            batch_captions = self.captioner.caption_batch(batch_images)
 
-                msg = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "image": img_scaled,
-                                "min_pixels": MIN_VISION_PIXELS,
-                                "max_pixels": MAX_VISION_PIXELS,
-                            },
-                            {
-                                "type": "text",
-                                "text": STRUCTURED_VLM_PROMPT,
-                            },
-                        ],
-                    }
-                ]
-                batch_messages.append(msg)
-
-            texts = [
-                self.processor.apply_chat_template(
-                    msg, tokenize=False, add_generation_prompt=True
-                )
-                for msg in batch_messages
-            ]
-            image_inputs, video_inputs = process_vision_info(batch_messages)
-
-            with torch.inference_mode():
-                inputs = self.processor(
-                    text=texts,
-                    images=image_inputs,
-                    videos=video_inputs,
-                    padding=True,
-                    return_tensors="pt",
-                )
-
-                model_device = getattr(self.model, "device", DEVICE)
-                inputs = inputs.to(model_device)
-
-                max_toks = max(VLM_MAX_NEW_TOKENS, 256)
-                generated_ids = self.model.generate(
-                    **inputs,
-                    max_new_tokens=max_toks,
-                    do_sample=False,
-                )
-                generated_ids_trimmed = [
-                    out_ids[len(in_ids) :]
-                    for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-                ]
-
-                output_texts = self.processor.batch_decode(
-                    generated_ids_trimmed,
-                    skip_special_tokens=True,
-                    clean_up_tokenization_spaces=False,
-                )
-
-            for kf, out_text in zip(batch_kfs, output_texts):
-                desc = out_text.strip()
-                kf["vlm_caption"] = desc
-                print(f"  [Frame {kf['frame_id']} @ {kf['mid_time']:.2f}s]: Generated structured description.")
+            for kf, desc in zip(batch_kfs, batch_captions):
+                desc_clean = desc.strip()
+                kf["vlm_caption"] = desc_clean
+                print(f"  [Frame {kf['frame_id']} @ {kf['mid_time']:.2f}s]: \"{desc_clean[:120]}...\"")
                 results.append(
                     {
                         "type": "visual",
                         "frame_id": kf["frame_id"],
                         "start_time": kf["start_time"],
                         "end_time": kf["end_time"],
-                        "text": desc,
+                        "text": desc_clean,
                     }
                 )
 
-            del inputs, generated_ids, generated_ids_trimmed
             empty_gpu_cache()
 
         return results

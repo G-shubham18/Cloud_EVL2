@@ -79,8 +79,9 @@ class Stage1Ingestor:
     Stores Stage 1 output/index for each video separately so that data from one video
     never overwrites or mixes with another video.
     """
-    def __init__(self, base_store_dir: Optional[str] = None):
+    def __init__(self, base_store_dir: Optional[str] = None, captioning_model: Optional[str] = None):
         self.base_store_dir = base_store_dir if base_store_dir else VECTOR_STORE_DIR
+        self.captioning_model = captioning_model
         self.audio_extractor = None
         self.visual_extractor = None
         self.video_latencies: Dict[str, Dict[str, Any]] = {}
@@ -93,9 +94,9 @@ class Stage1Ingestor:
             from stage1_offline.audio_extractor import AudioExtractor
             self.audio_extractor = AudioExtractor()
         if self.visual_extractor is None:
-            print("[Stage 1 Ingestion] Initializing VisualExtractor model (Qwen-VL & CLIP)...")
+            print("[Stage 1 Ingestion] Initializing VisualExtractor model...")
             from stage1_offline.visual_extractor import VisualExtractor
-            self.visual_extractor = VisualExtractor()
+            self.visual_extractor = VisualExtractor(captioning_model=self.captioning_model)
 
     def _read_stored_latency(self, video_store_dir: str) -> Optional[Dict[str, Any]]:
         """Reads previously stored latency.json for a video if it exists on disk."""
@@ -373,6 +374,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_dir", type=str, default="dataset", help="Root dataset directory (containing videos/)")
     parser.add_argument("--videos_dir", type=str, default=None, help="Directory containing videos (defaults to dataset_dir/videos)")
     parser.add_argument("--latency_file", type=str, default="output/ingestion_latency.json", help="Path to save ingestion latency JSON report")
+    parser.add_argument("--captioning_model", type=str, default=None, help="Visual captioning model (default: from config)")
     parser.add_argument("--force-reindex", action="store_true", help="Force re-indexing even if already indexed")
     args = parser.parse_args()
 
@@ -384,7 +386,7 @@ if __name__ == "__main__":
         else:
             v_dir = args.dataset_dir
 
-    ingestor = Stage1Ingestor()
+    ingestor = Stage1Ingestor(captioning_model=args.captioning_model)
     results = ingestor.process_dataset(v_dir, force_reindex=args.force_reindex, latency_file=args.latency_file)
 
     total_videos = len(results)

@@ -250,7 +250,10 @@ def run_single_pipeline(
     video_path: str,
     question: str,
     force_reindex: bool = False,
-    latency_file: Optional[str] = "output/ingestion_latency.json"
+    latency_file: Optional[str] = "output/ingestion_latency.json",
+    llm_model: Optional[str] = None,
+    captioning_model: Optional[str] = None,
+    llm_backend: Optional[str] = None
 ):
     """Legacy single-video execution entry point."""
     abs_video_path = os.path.abspath(video_path)
@@ -258,7 +261,7 @@ def run_single_pipeline(
     print(f"Video: {abs_video_path}")
     print(f"Question: {question}")
 
-    ingestor = Stage1Ingestor()
+    ingestor = Stage1Ingestor(captioning_model=captioning_model)
     indexer, reused, err = ingestor.process_single_video(abs_video_path, force_reindex=force_reindex)
     if indexer is None:
         raise RuntimeError(f"Stage 1 failed for video {abs_video_path}: {err}")
@@ -270,7 +273,7 @@ def run_single_pipeline(
         'dedup': Deduplicator(),
         'reranker': ReRanker(),
         'gate': SufficiencyGate(),
-        'generator': Generator()
+        'generator': Generator(model_name=llm_model, backend=llm_backend)
     }
 
     ans = answer_question_for_video(indexer, question, shared_components)
@@ -285,7 +288,8 @@ def load_stage1_indices(
     base_store_dir: Optional[str] = None,
     allow_auto_ingest: bool = False,
     force_reindex: bool = False,
-    latency_file: Optional[str] = None
+    latency_file: Optional[str] = None,
+    captioning_model: Optional[str] = None
 ) -> Dict[str, Dict]:
     """
     Scans videos_dir and loads existing Stage 1 vector stores from disk.
@@ -325,7 +329,7 @@ def load_stage1_indices(
     if missing_videos:
         if allow_auto_ingest:
             print(f"\n[Stage 1 Index Loader] Missing Stage 1 indices for {len(missing_videos)} video(s). Running Stage 1 Ingestion automatically...")
-            ingestor = Stage1Ingestor(base_store_dir=base_store_dir)
+            ingestor = Stage1Ingestor(base_store_dir=base_store_dir, captioning_model=captioning_model)
             for m_vpath in missing_videos:
                 idxer, reused, err = ingestor.process_single_video(m_vpath, force_reindex=force_reindex)
                 m_store_dir = get_video_store_dir(m_vpath, base_store_dir)
@@ -362,7 +366,10 @@ def process_dataset_pipeline(
     output_dir: str = "output",
     force_reindex: bool = False,
     auto_ingest: bool = False,
-    latency_file: Optional[str] = None
+    latency_file: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    captioning_model: Optional[str] = None,
+    llm_backend: Optional[str] = None
 ):
     """
     Main batch processing workflow for EchoVision:
@@ -388,7 +395,8 @@ def process_dataset_pipeline(
         videos_dir=videos_dir,
         allow_auto_ingest=auto_ingest,
         force_reindex=force_reindex,
-        latency_file=lat_report_path
+        latency_file=lat_report_path,
+        captioning_model=captioning_model
     )
 
     discovered_videos = list(stage1_results.keys())
@@ -448,7 +456,7 @@ def process_dataset_pipeline(
         'dedup': Deduplicator(),
         'reranker': ReRanker(),
         'gate': SufficiencyGate(),
-        'generator': Generator()
+        'generator': Generator(model_name=llm_model, backend=llm_backend)
     }
 
     successful_questions = 0
@@ -555,6 +563,9 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default="output", help="Path to save output JSON files")
     parser.add_argument("--video", type=str, default=None, help="Path to a single video file (for legacy single-video mode)")
     parser.add_argument("--question", type=str, default=None, help="Question for single video mode")
+    parser.add_argument("--llm_model", type=str, default=None, help="LLM generator model or HF ID (default: from config, qwen2.5-v1-72b-instruct)")
+    parser.add_argument("--captioning_model", type=str, default=None, help="Visual captioning model or HF ID (default: from config, Salesforce/blip-image-captioning-large)")
+    parser.add_argument("--llm_backend", type=str, default=None, choices=["auto", "api", "serverless", "local"], help="LLM inference backend ('auto', 'api', or 'local')")
     parser.add_argument("--force-reindex", action="store_true", help="Force re-indexing even if Stage 1 output exists")
     parser.add_argument("--auto-ingest", action="store_true", help="Automatically run Stage 1 ingestion if index is missing")
     parser.add_argument("--latency_file", type=str, default=None, help="Path to save ingestion latency JSON report (defaults to <output_dir>/ingestion_latency.json)")
@@ -567,7 +578,15 @@ if __name__ == "__main__":
             print(f"Error: Video file not found: {args.video}")
             sys.exit(1)
         lat_f = args.latency_file if args.latency_file else os.path.join(args.output_dir, "ingestion_latency.json")
-        run_single_pipeline(args.video, args.question, force_reindex=args.force_reindex, latency_file=lat_f)
+        run_single_pipeline(
+            args.video,
+            args.question,
+            force_reindex=args.force_reindex,
+            latency_file=lat_f,
+            llm_model=args.llm_model,
+            captioning_model=args.captioning_model,
+            llm_backend=args.llm_backend
+        )
     else:
         # Default batch dataset mode
         v_dir = args.videos_dir if args.videos_dir else os.path.join(args.dataset_dir, "videos")
@@ -578,6 +597,9 @@ if __name__ == "__main__":
             output_dir=args.output_dir,
             force_reindex=args.force_reindex,
             auto_ingest=args.auto_ingest,
-            latency_file=args.latency_file
+            latency_file=args.latency_file,
+            llm_model=args.llm_model,
+            captioning_model=args.captioning_model,
+            llm_backend=args.llm_backend
         )
 
