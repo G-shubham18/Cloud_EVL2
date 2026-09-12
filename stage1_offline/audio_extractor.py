@@ -13,6 +13,8 @@ from config import (
     DEVICE,
     IS_CUDA_AVAILABLE,
     IS_GPU,
+    TORCH_DTYPE,
+    empty_gpu_cache,
     CLAP_MODEL,
     AUDIO_CHUNK_LENGTH,
     AUDIO_OVERLAP,
@@ -20,31 +22,51 @@ from config import (
     AUDIO_BATCH_SIZE,
     MIN_EVENT_DURATION,
     AUDIO_RMS_THRESHOLD,
-    STEREO_BALANCE_THRESHOLD,
-    empty_gpu_cache,
 )
 
 
 class AudioExtractor:
     def __init__(self):
-        print(f"Loading Whisper model: {WHISPER_MODEL}")
         whisper_dev = "cuda" if IS_CUDA_AVAILABLE else "cpu"
         whisper_compute = "float16" if IS_CUDA_AVAILABLE else "int8"
-        self.whisper_model = WhisperModel(
-            WHISPER_MODEL,
-            device=whisper_dev,
-            compute_type=whisper_compute,
-        )
+        print(f"[AudioExtractor] Initializing Whisper model on device={whisper_dev} ({whisper_compute})...")
 
-        print(f"Loading Audio Classification model (Zero-Shot CLAP): {CLAP_MODEL}")
-        # Use CUDA if available; otherwise run CLAP on CPU to avoid Level Zero / XPU multi-threading
-        # contention with visual extraction and eliminate GPU VRAM overhead.
-        clap_dev = 0 if IS_CUDA_AVAILABLE else -1
-        print(f"CLAP Audio Classifier Device: {'cuda:0' if clap_dev == 0 else 'cpu'}")
+        try:
+            from faster_whisper import WhisperModel
+            self.whisper_mode = "faster_whisper"
+            self.whisper_model = WhisperModel(
+                WHISPER_MODEL,
+                device=whisper_dev,
+                compute_type=whisper_compute,
+            )
+        except Exception as e:
+            print(f"[AudioExtractor Warning] faster-whisper on {whisper_dev} failed ({e}), falling back to HF Whisper pipeline...")
+            from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+            self.whisper_mode = "hf_pipeline"
+            hf_whisper_id = "distil-whisper/distil-large-v3"
+            hf_dev = DEVICE if (IS_GPU and DEVICE != "cpu") else "cpu"
+            hf_dtype = TORCH_DTYPE if (IS_GPU and DEVICE != "cpu") else torch.float32
+            self.hf_model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                hf_whisper_id,
+                torch_dtype=hf_dtype,
+                low_cpu_mem_usage=True,
+            ).to(hf_dev)
+            self.hf_processor = AutoProcessor.from_pretrained(hf_whisper_id)
+            self.whisper_pipe = pipeline(
+                "automatic-speech-recognition",
+                model=self.hf_model,
+                tokenizer=self.hf_processor.tokenizer,
+                feature_extractor=self.hf_processor.feature_extractor,
+                torch_dtype=hf_dtype,
+                device=hf_dev,
+            )
+
+        clap_device = DEVICE if (IS_GPU and DEVICE != "cpu") else -1
+        print(f"[AudioExtractor] Loading Audio Classification model (Zero-Shot CLAP) on device={clap_device}: {CLAP_MODEL}")
         self.audio_classifier = pipeline(
             task="zero-shot-audio-classification",
             model=CLAP_MODEL,
-            device=clap_dev,
+            device=clap_device,
         )
 
         # Define comprehensive sound event taxonomy to cover everyday, mechanical, musical, and contact acoustics
@@ -184,8 +206,8 @@ class AudioExtractor:
         return "ffmpeg"
 
     def extract_audio_from_video(self, video_path: str, output_wav_path: str):
-        """Extract the audio track from a video file as a 16kHz mono .wav file."""
-        print(f"Extracting mono audio from {video_path} to {output_wav_path}")
+        """Extracts the audio track from a video file as a 16kHz mono .wav file."""
+        print(f"Extracting audio from {video_path} to {output_wav_path}")
         ffmpeg_bin = self._get_ffmpeg_cmd()
         command = [
             ffmpeg_bin,
@@ -198,7 +220,7 @@ class AudioExtractor:
             "-ar",
             "16000",  # 16kHz sampling rate
             "-ac",
-            "1",  # Mono audio required by the requested pipeline
+            "1",  # 1 channel (Mono)
             output_wav_path,
         ]
 
@@ -218,21 +240,59 @@ class AudioExtractor:
         return output_wav_path
 
     def transcribe_speech(self, audio_path: str):
-        """Transcribes speech using faster-whisper with torch.inference_mode() and returns timestamped segments."""
-        print(f"Transcribing speech from {audio_path}")
+        """Transcribes speech on GPU using torch.inference_mode() and returns timestamped segments."""
+        print(f"Transcribing speech on GPU from {audio_path}")
+        results = []
         with torch.inference_mode():
-            segments, info = self.whisper_model.transcribe(audio_path, beam_size=1)
+            if getattr(self, "whisper_mode", "faster_whisper") == "faster_whisper":
+                segments, info = self.whisper_model.transcribe(audio_path, beam_size=1)
+                for segment in segments:
+                    results.append(
+                        {
+                            "type": "speech",
+                            "start_time": segment.start,
+                            "end_time": segment.end,
+                            "text": segment.text.strip(),
+                        }
+                    )
+            else:
+                with wave.open(audio_path, "rb") as wf:
+                    sr = wf.getframerate()
+                    n_frames = wf.getnframes()
+                    sampwidth = wf.getsampwidth()
+                    n_channels = wf.getnchannels()
+                    raw_bytes = wf.readframes(n_frames)
 
-            results = []
-            for segment in segments:
-                results.append(
-                    {
-                        "type": "speech",
-                        "start_time": segment.start,
-                        "end_time": segment.end,
-                        "text": segment.text.strip(),
-                    }
-                )
+                if sampwidth == 2:
+                    y = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+                elif sampwidth == 4:
+                    y = np.frombuffer(raw_bytes, dtype=np.int32).astype(np.float32) / 2147483648.0
+                else:
+                    y = (np.frombuffer(raw_bytes, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+
+                if n_channels > 1:
+                    y = y.reshape(-1, n_channels).mean(axis=1)
+
+                duration = len(y) / float(sr) if sr > 0 else 0.0
+                chunk_sec = 10.0
+                t = 0.0
+                while t < duration:
+                    t_end = min(t + chunk_sec, duration)
+                    chunk_samples = y[int(t * sr) : int(t_end * sr)]
+                    if len(chunk_samples) > 0 and np.sqrt(np.mean(chunk_samples**2)) >= 0.005:
+                        chunk_out = self.whisper_pipe(chunk_samples, return_timestamps=False)
+                        txt = chunk_out.get("text", "").strip()
+                        if txt and txt.lower().strip(" .!?,") not in ["thank you", "thanks", "you", "subtitles by", "bye"]:
+                            results.append(
+                                {
+                                    "type": "speech",
+                                    "start_time": round(t, 2),
+                                    "end_time": round(t_end, 2),
+                                    "text": txt,
+                                }
+                            )
+                    t += chunk_sec
+        empty_gpu_cache()
         return results
 
     def _merge_adjacent_sound_events(
@@ -272,115 +332,20 @@ class AudioExtractor:
 
         return merged
 
-    def _remove_speech_from_segment(
-        self,
-        segment_audio,
-        segment_start,
-        segment_end,
-        speech_segments,
-        sample_rate,
-    ):
-        """Mute portions of a fixed audio segment that contain speech."""
-        cleaned = np.array(segment_audio, dtype=np.float32, copy=True)
-
-        for speech in speech_segments:
-            speech_start = float(speech["start_time"])
-            speech_end = float(speech["end_time"])
-
-            overlap_start = max(segment_start, speech_start)
-            overlap_end = min(segment_end, speech_end)
-
-            if overlap_start < overlap_end:
-                local_start = max(
-                    0, int(round((overlap_start - segment_start) * sample_rate))
-                )
-                local_end = min(
-                    len(cleaned),
-                    int(round((overlap_end - segment_start) * sample_rate))
-                )
-
-                if local_start < local_end:
-                    cleaned[local_start:local_end] = 0.0
-
-        return cleaned
-
-    def _classify_background_audio(
-        self,
-        audio_segment,
-        start_time,
-        end_time,
-        threshold=AUDIO_THRESHOLD,
-    ):
-        """Run the existing CLAP model on speech-removed audio."""
-        if len(audio_segment) == 0:
-            return []
-
-        try:
-            with torch.inference_mode():
-                classifications = self.audio_classifier(
-                    audio_segment,
-                    candidate_labels=self.sound_event_labels,
-                )
-        except Exception as clf_err:
-            print(
-                f"[AudioExtractor Warning] CLAP failed ({clf_err}). "
-                "Retrying on CPU..."
-            )
-            try:
-                if not hasattr(self, "_cpu_fallback_classifier") or                         self._cpu_fallback_classifier is None:
-                    self._cpu_fallback_classifier = pipeline(
-                        task="zero-shot-audio-classification",
-                        model=CLAP_MODEL,
-                        device=-1,
-                    )
-
-                classifications = self._cpu_fallback_classifier(
-                    audio_segment,
-                    candidate_labels=self.sound_event_labels,
-                )
-            except Exception as fb_err:
-                print(
-                    f"[AudioExtractor Error] CPU fallback failed ({fb_err}). "
-                    "Skipping event."
-                )
-                return []
-
-        events = []
-
-        for top_class in classifications[:2]:
-            label = top_class["label"]
-            score = float(top_class["score"])
-
-            if score >= threshold and "silence" not in label.lower():
-                events.append(
-                    {
-                        "type": "sound",
-                        "start_time": float(start_time),
-                        "end_time": float(end_time),
-                        "text": f"Sound of {label}",
-                        "score": score,
-                    }
-                )
-
-        empty_gpu_cache()
-        return events
-
-    def process_audio_segments(
+    def detect_sound_events(
         self,
         audio_path: str,
-        segment_duration_s: float = AUDIO_CHUNK_LENGTH,
+        chunk_length_s: float = AUDIO_CHUNK_LENGTH,
+        overlap_s: float = AUDIO_OVERLAP,
         threshold: float = AUDIO_THRESHOLD,
+        batch_size: int = AUDIO_BATCH_SIZE,
+        min_event_duration: float = MIN_EVENT_DURATION,
+        rms_threshold: float = AUDIO_RMS_THRESHOLD,
     ):
-        """Process audio using the requested fixed-segment pipeline.
+        """Detects sound events by sliding a window over the audio."""
+        print(f"Detecting sound events in {audio_path}")
 
-        Flow:
-            mono WAV
-              -> fixed-duration segments
-              -> Faster-Whisper
-              -> mute detected speech
-              -> existing CLAP classifier
-              -> transcript + segments + events
-        """
+        # Load audio using standard wave module & numpy
         with wave.open(audio_path, "rb") as wf:
             n_channels = wf.getnchannels()
             sampwidth = wf.getsampwidth()
@@ -388,183 +353,128 @@ class AudioExtractor:
             n_frames = wf.getnframes()
             raw_bytes = wf.readframes(n_frames)
 
-        if n_channels != 1:
-            raise ValueError(
-                f"Expected mono audio, but received {n_channels} channels."
-            )
-
         if sampwidth == 2:
-            y = np.frombuffer(raw_bytes, dtype=np.int16).astype(
-                np.float32
-            ) / 32768.0
+            y = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
         elif sampwidth == 4:
-            y = np.frombuffer(raw_bytes, dtype=np.int32).astype(
-                np.float32
-            ) / 2147483648.0
+            y = np.frombuffer(raw_bytes, dtype=np.int32).astype(np.float32) / 2147483648.0
         elif sampwidth == 1:
-            y = (
-                np.frombuffer(raw_bytes, dtype=np.uint8).astype(
-                    np.float32
-                ) - 128.0
-            ) / 128.0
+            y = (np.frombuffer(raw_bytes, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
         else:
             raise ValueError(f"Unsupported sample width: {sampwidth}")
 
-        segment_samples = max(1, int(round(segment_duration_s * sr)))
-        transcript = []
-        segment_records = []
-        events = []
+        if n_channels > 1:
+            y = y.reshape(-1, n_channels).mean(axis=1)
 
-        # ---------------------------------------------------------------
-        # Split the complete mono audio into fixed-duration segments.
-        # ---------------------------------------------------------------
-        for start_sample in range(0, len(y), segment_samples):
-            end_sample = min(
-                start_sample + segment_samples,
-                len(y),
-            )
+        duration = float(len(y)) / float(sr) if sr > 0 else 0.0
+        step_s = chunk_length_s - overlap_s
 
-            segment_start = start_sample / float(sr)
-            segment_end = end_sample / float(sr)
-            segment_audio = y[start_sample:end_sample]
+        chunks_to_process = []
+        current_time = 0.0
+        total_chunks = 0
 
-            if len(segment_audio) == 0:
-                continue
+        # Extract audio chunks
+        while current_time < duration:
+            end_time = min(current_time + chunk_length_s, duration)
+            if end_time - current_time < 0.5:  # Skip very short final chunks
+                break
 
-            # -----------------------------------------------------------
-            # Faster-Whisper: speech stream
-            # -----------------------------------------------------------
-            try:
-                with torch.inference_mode():
-                    whisper_segments, _ = self.whisper_model.transcribe(
-                        segment_audio,
-                        beam_size=1,
-                    )
-                    whisper_segments = list(whisper_segments)
-            except Exception as whisper_err:
-                print(
-                    f"[AudioExtractor Warning] Whisper failed for "
-                    f"{segment_start:.2f}-{segment_end:.2f}s: {whisper_err}"
-                )
-                whisper_segments = []
+            total_chunks += 1
+            start_sample = int(current_time * sr)
+            end_sample = int(end_time * sr)
+            chunk = y[start_sample:end_sample]
 
-            segment_speech = []
+            # RMS energy threshold check to skip low-energy (silent) chunks
+            rms = np.sqrt(np.mean(chunk**2)) if len(chunk) > 0 else 0.0
 
-            for speech in whisper_segments:
-                speech_text = speech.text.strip()
-
-                if not speech_text:
-                    continue
-
-                # Whisper timestamps are local to this fixed segment.
-                # Convert them to the original video/audio timeline.
-                speech_start = segment_start + float(speech.start)
-                speech_end = min(
-                    segment_end,
-                    segment_start + float(speech.end),
+            if rms >= rms_threshold:
+                chunks_to_process.append(
+                    {
+                        "start_time": current_time,
+                        "end_time": end_time,
+                        "audio": chunk,
+                    }
                 )
 
-                item = {
-                    "type": "speech",
-                    "start_time": speech_start,
-                    "end_time": speech_end,
-                    "text": speech_text,
-                }
+            current_time += step_s
 
-                transcript.append(item)
-                segment_speech.append(item)
-
-            # -----------------------------------------------------------
-            # Remove/mute detected speech before event classification.
-            # -----------------------------------------------------------
-            background_audio = self._remove_speech_from_segment(
-                segment_audio,
-                segment_start,
-                segment_end,
-                segment_speech,
-                sr,
+        num_valid_chunks = len(chunks_to_process)
+        if total_chunks > num_valid_chunks:
+            print(
+                f"Skipped {total_chunks - num_valid_chunks}/{total_chunks} low-energy (silent) chunks using RMS threshold ({rms_threshold})."
             )
 
-            # -----------------------------------------------------------
-            # Existing CLAP model: background audio event stream
-            # -----------------------------------------------------------
-            rms = (
-                float(np.sqrt(np.mean(background_audio ** 2)))
-                if len(background_audio)
-                else 0.0
-            )
+        raw_events = []
 
-            segment_events = []
+        # Batch CLAP inference
+        for i in range(0, num_valid_chunks, batch_size):
+            batch_items = chunks_to_process[i : i + batch_size]
+            batch_audios = [item["audio"] for item in batch_items]
 
-            if rms >= AUDIO_RMS_THRESHOLD:
-                segment_events = self._classify_background_audio(
-                    background_audio,
-                    segment_start,
-                    segment_end,
-                    threshold=threshold,
+            chunk_idx_display = min(i + batch_size, num_valid_chunks)
+            print(f"Processing audio chunk {chunk_idx_display}/{num_valid_chunks}")
+
+            with torch.inference_mode():
+                # HF pipeline batch inference
+                batch_classifications = self.audio_classifier(
+                    batch_audios, candidate_labels=self.sound_event_labels
                 )
 
-            events.extend(segment_events)
+                # Ensure output structure is a list of results per chunk
+                if (
+                    len(batch_audios) == 1
+                    and isinstance(batch_classifications, list)
+                    and len(batch_classifications) > 0
+                    and isinstance(batch_classifications[0], dict)
+                ):
+                    batch_classifications = [batch_classifications]
 
-            segment_records.append(
-                {
-                    "start_time": segment_start,
-                    "end_time": segment_end,
-                    "speech": segment_speech,
-                    "speech_removed": bool(segment_speech),
-                    "events": segment_events,
-                }
-            )
+                for item, classifications in zip(
+                    batch_items, batch_classifications
+                ):
+                    # Check top 2 candidate sound labels above threshold
+                    for top_class in classifications[:2]:
+                        if (
+                            top_class["score"] > threshold
+                            and "silence" not in top_class["label"].lower()
+                        ):
+                            raw_events.append(
+                                {
+                                    "type": "sound",
+                                    "start_time": item["start_time"],
+                                    "end_time": item["end_time"],
+                                    "text": f"Sound of {top_class['label']}",
+                                    "score": top_class["score"],
+                                }
+                            )
 
-        # Remove repeated detections caused by adjacent fixed segments.
-        events = self._merge_adjacent_sound_events(
-            events,
-            min_event_duration=MIN_EVENT_DURATION,
+            # Free GPU memory after each inference batch across CUDA and XPU
+            empty_gpu_cache()
+
+        # Merge adjacent identical sound events
+        merged_events = self._merge_adjacent_sound_events(
+            raw_events, min_event_duration=min_event_duration
         )
-
-        transcript.sort(
-            key=lambda x: (x["start_time"], x["end_time"])
-        )
-        events.sort(
-            key=lambda x: (x["start_time"], x["end_time"])
-        )
-
-        return {
-            "transcript": transcript,
-            "segments": segment_records,
-            "events": events,
-        }
+        return merged_events
 
     def process_video(self, video_path: str):
-        """Run the complete requested audio pipeline.
-
-        Video
-          -> FFmpeg
-          -> 16 kHz mono
-          -> fixed-duration segments
-          -> Faster-Whisper
-          -> mute detected speech
-          -> existing CLAP classifier
-          -> transcript + segments + events
-        """
-        with tempfile.NamedTemporaryFile(
-            suffix=".wav",
-            delete=False,
-        ) as temp_wav:
+        """Runs the full audio extraction pipeline."""
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
             wav_path = temp_wav.name
 
         try:
             self.extract_audio_from_video(video_path, wav_path)
 
-            return self.process_audio_segments(
-                wav_path,
-                segment_duration_s=AUDIO_CHUNK_LENGTH,
-                threshold=AUDIO_THRESHOLD,
-            )
+            speech_segments = self.transcribe_speech(wav_path)
+            sound_events = self.detect_sound_events(wav_path)
+
+            # Combine and sort by start time
+            all_audio_facts = speech_segments + sound_events
+            all_audio_facts.sort(key=lambda x: x["start_time"])
+
+            return all_audio_facts
         finally:
             if os.path.exists(wav_path):
                 os.remove(wav_path)
-
 
 
 if __name__ == "__main__":
