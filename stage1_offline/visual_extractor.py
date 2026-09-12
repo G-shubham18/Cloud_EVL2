@@ -41,13 +41,17 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
-from qwen_vl_utils import process_vision_info
+try:
+    from qwen_vl_utils import process_vision_info
+except ImportError:
+    process_vision_info = None
 from transformers import AutoProcessor
 from sentence_transformers import SentenceTransformer
 
 # ------------------------------------------------------------------------------
 # SEGMENT 1: SYSTEM CONFIGURATION & HARDWARE CONSTANTS
 # ------------------------------------------------------------------------------
+import config
 from config import (
     QWEN_VL_MODEL,
     CLIP_MODEL,
