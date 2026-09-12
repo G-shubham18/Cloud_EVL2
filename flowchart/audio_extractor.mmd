@@ -5,65 +5,28 @@ flowchart TD
     classDef modelStyle fill:#ede7f6,stroke:#512da8,stroke-width:2px,color:#311b92;
     classDef decisionStyle fill:#fffde7,stroke:#fbc02d,stroke-width:2px,color:#f57f17;
     classDef outputStyle fill:#e0f2f1,stroke:#00695c,stroke-width:2px,color:#004d40;
+    classDef dbStyle fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#bf360c;
 
-    subgraph AudioDemux ["1. Audio Extraction & Demuxing"]
-        V["Raw Input Video File<br/>(MP4 / MKV / WEBM / AVI / MOV / 3GP)"]:::inputStyle
-        FFmpeg["FFmpeg Audio Extractor<br/>ffmpeg -i video -vn -ac 1 -ar 16000 output.wav"]:::processStyle
-        MonoAudio["16 kHz 16-bit Mono PCM Audio Stream<br/>(Buffer: y, Sample Rate: 16,000 Hz)"]:::processStyle
-
-        V --> FFmpeg --> MonoAudio
-    end
-
-    subgraph Segmentation ["2. Fixed-Duration Window Segmentation"]
-        Segmenter["Fixed-Duration Sliding Window Slicer<br/>- Duration: AUDIO_CHUNK_LENGTH = 3.0s<br/>- Overlap: AUDIO_OVERLAP = 1.0s"]:::processStyle
-        RMSCheck{"RMS Energy >= 0.001?<br/>(Silence Filter)"}:::decisionStyle
-        SkipChunk["Skip Silent Segment"]:::processStyle
-        ActiveChunk["Active Audio Segment<br/>(start_time to end_time)"]:::processStyle
-
-        MonoAudio --> Segmenter --> RMSCheck
-        RMSCheck -- NO --> SkipChunk
-        RMSCheck -- YES --> ActiveChunk
-    end
-
-    subgraph SpeechPipeline ["3. Faster-Whisper Speech Recognition (ASR)"]
-        WhisperModel["Faster-Whisper (large-v3)<br/>Beam Size: 1, Optimized CT2 Engine"]:::modelStyle
-        Transcribe["Transcribe Speech in Segment<br/>(Segments, Words, Start/End Timestamps)"]:::processStyle
-        HasSpeech{"Speech Detected?"}:::decisionStyle
-        SpeechRecord["Create Speech Fact Record:<br/>[Speech - start_s to end_s] Text"]:::outputStyle
-
-        ActiveChunk --> WhisperModel --> Transcribe --> HasSpeech
-        HasSpeech -- YES --> SpeechRecord
-    end
-
-    subgraph SpeechSuppression ["4. Speech Muting & Background Audio Isolation"]
-        Muter["Speech Interval Muting Engine<br/>Zero-out Audio Samples during Speech Timestamps:<br/>y_bg[speech_start : speech_end] = 0.0"]:::processStyle
-        BackgroundAudio["Clean Background Audio Stream<br/>(Speech-Suppressed Residual Waveform)"]:::processStyle
-
-        HasSpeech -- YES --> Muter
-        HasSpeech -- NO --> BackgroundAudio
-        Muter --> BackgroundAudio
-    end
-
-    subgraph SoundClassification ["5. LAION-CLAP Background Sound Classification"]
-        CLAPModel["LAION-CLAP Model<br/>(laion/clap-htsat-unfused)"]:::modelStyle
-        ZeroShotTaxonomy["Curated Acoustic Sound Taxonomy (50+ Classes):<br/>Musical instruments, applause, laughter, footstep, door slam, typing, etc."]:::processStyle
-        CosineScore["Audio-Text Embedding Cosine Similarity<br/>Score = DotProduct(E_audio, E_text)"]:::processStyle
-        ConfThresh{"Score >= 0.30 & Duration >= 0.5s?"}:::decisionStyle
-        MergeAdjacent["Merge Adjacent Overlapping Sound Events<br/>(Eliminates Boundary Discontinuities)"]:::processStyle
-
-        BackgroundAudio --> CLAPModel
-        ZeroShotTaxonomy --> CLAPModel
-        CLAPModel --> CosineScore --> ConfThresh
-        ConfThresh -- YES --> MergeAdjacent
-    end
-
-    subgraph FinalAudioFacts ["6. Chronological Audio Facts Timeline"]
-        FormatSound["Create Sound Fact Record:<br/>[Sound - start_s to end_s] Sound of {label}"]:::outputStyle
-        MergeFacts["Chronological Sort & Merge<br/>(Sorted by start_time ascending)"]:::outputStyle
-        OutputTimeline["Final Audio Facts List<br/>(Passed to ChromaDB Vector Indexer)"]:::outputStyle
-
-        MergeAdjacent --> FormatSound
-        SpeechRecord --> MergeFacts
-        FormatSound --> MergeFacts
-        MergeFacts --> OutputTimeline
-    end
+    A["Input Video"]:::inputStyle --> B["Extract Audio<br/>16 kHz Mono"]:::processStyle
+    
+    B --> C["Segment Audio<br/>3s Window + 1s Overlap"]:::processStyle
+    
+    C --> D{"Non-Silent Segment?"}:::decisionStyle
+    D -- No --> Z["Skip"]:::processStyle
+    D -- Yes --> E["Faster-Whisper<br/>Speech Detection + Timestamps"]:::modelStyle
+    
+    E --> F["Speech Facts<br/>Text + Start/End Time"]:::outputStyle
+    
+    E --> G["Remove Speech Intervals"]:::processStyle
+    
+    G --> H["LAION-CLAP<br/>Background Sound Detection"]:::modelStyle
+    
+    H --> I{"Sound Confidence<br/>+ Minimum Duration?"}:::decisionStyle
+    I -- No --> Z
+    I -- Yes --> J["Sound Facts<br/>Label + Start/End Time"]:::outputStyle
+    
+    F --> K["Merge + Sort<br/>All Audio Facts"]:::processStyle
+    J --> K
+    
+    K --> L["Final Audio Timeline"]:::outputStyle
+    L --> M[("ChromaDB")]:::dbStyle

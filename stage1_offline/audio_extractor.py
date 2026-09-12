@@ -41,7 +41,7 @@ class AudioExtractor:
             )
         except Exception as e:
             print(f"[AudioExtractor Warning] faster-whisper on {whisper_dev} failed ({e}), falling back to HF Whisper pipeline...")
-            from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+            from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
             self.whisper_mode = "hf_pipeline"
             hf_whisper_id = "distil-whisper/distil-large-v3"
             hf_dev = DEVICE if (IS_GPU and DEVICE != "cpu") else "cpu"
@@ -239,22 +239,24 @@ class AudioExtractor:
             ) from e
         return output_wav_path
 
-    def transcribe_speech(self, audio_path: str):
-        """Transcribes speech on GPU using torch.inference_mode() and returns timestamped segments."""
-        print(f"Transcribing speech on GPU from {audio_path}")
+    def transcribe_speech(self, audio_path: str) -> list:
+        """Transcribes speech from an audio file using Whisper with torch.inference_mode()."""
+        print(f"Transcribing speech from {audio_path}")
         results = []
         with torch.inference_mode():
             if getattr(self, "whisper_mode", "faster_whisper") == "faster_whisper":
                 segments, info = self.whisper_model.transcribe(audio_path, beam_size=1)
                 for segment in segments:
-                    results.append(
-                        {
-                            "type": "speech",
-                            "start_time": segment.start,
-                            "end_time": segment.end,
-                            "text": segment.text.strip(),
-                        }
-                    )
+                    txt = segment.text.strip()
+                    if txt and txt.lower().strip(" .!?,") not in ["thank you", "thanks", "you", "subtitles by", "bye"]:
+                        results.append(
+                            {
+                                "type": "speech",
+                                "start_time": round(float(segment.start), 2),
+                                "end_time": round(float(segment.end), 2),
+                                "text": txt,
+                            }
+                        )
             else:
                 with wave.open(audio_path, "rb") as wf:
                     sr = wf.getframerate()
@@ -267,8 +269,10 @@ class AudioExtractor:
                     y = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
                 elif sampwidth == 4:
                     y = np.frombuffer(raw_bytes, dtype=np.int32).astype(np.float32) / 2147483648.0
-                else:
+                elif sampwidth == 1:
                     y = (np.frombuffer(raw_bytes, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+                else:
+                    raise ValueError(f"Unsupported sample width: {sampwidth}")
 
                 if n_channels > 1:
                     y = y.reshape(-1, n_channels).mean(axis=1)
@@ -295,16 +299,119 @@ class AudioExtractor:
         empty_gpu_cache()
         return results
 
+    def _transcribe_segment(
+        self,
+        segment_audio: np.ndarray,
+        segment_start: float,
+        segment_end: float,
+    ) -> list:
+        """Step E: Transcribes speech within a 3s segment using Faster-Whisper."""
+        if len(segment_audio) == 0:
+            return []
+
+        results = []
+        try:
+            with torch.inference_mode():
+                if getattr(self, "whisper_mode", "faster_whisper") == "faster_whisper":
+                    segments, _ = self.whisper_model.transcribe(segment_audio, beam_size=1)
+                    for seg in segments:
+                        txt = seg.text.strip()
+                        if txt and txt.lower().strip(" .!?,") not in ["thank you", "thanks", "you", "subtitles by", "bye"]:
+                            sp_start = round(segment_start + float(seg.start), 2)
+                            sp_end = min(round(segment_end, 2), round(segment_start + float(seg.end), 2))
+                            results.append({
+                                "type": "speech",
+                                "start_time": sp_start,
+                                "end_time": sp_end,
+                                "text": txt,
+                            })
+                else:
+                    chunk_out = self.whisper_pipe(segment_audio, return_timestamps=False)
+                    txt = chunk_out.get("text", "").strip()
+                    if txt and txt.lower().strip(" .!?,") not in ["thank you", "thanks", "you", "subtitles by", "bye"]:
+                        results.append({
+                            "type": "speech",
+                            "start_time": round(segment_start, 2),
+                            "end_time": round(segment_end, 2),
+                            "text": txt,
+                        })
+        except Exception:
+            pass
+
+        return results
+
+    def _remove_speech_from_segment(
+        self,
+        segment_audio: np.ndarray,
+        segment_start: float,
+        segment_end: float,
+        speech_segments: list,
+        sample_rate: int = 16000,
+    ) -> np.ndarray:
+        """Step G: Mute/zero-out portions of an audio segment that contain detected speech."""
+        if not speech_segments or len(segment_audio) == 0:
+            return segment_audio
+
+        cleaned = np.array(segment_audio, dtype=np.float32, copy=True)
+        for speech in speech_segments:
+            sp_start = float(speech["start_time"])
+            sp_end = float(speech["end_time"])
+
+            overlap_start = max(segment_start, sp_start)
+            overlap_end = min(segment_end, sp_end)
+
+            if overlap_start < overlap_end:
+                local_start = max(
+                    0, int(round((overlap_start - segment_start) * sample_rate))
+                )
+                local_end = min(
+                    len(cleaned),
+                    int(round((overlap_end - segment_start) * sample_rate))
+                )
+                if local_start < local_end:
+                    cleaned[local_start:local_end] = 0.0
+
+        return cleaned
+
+    def _merge_overlapping_speech(self, speech_facts: list) -> list:
+        """Step K (helper): Merges and deduplicates overlapping speech facts from sliding windows."""
+        if not speech_facts:
+            return []
+
+        speech_facts.sort(key=lambda x: (x["start_time"], x["end_time"]))
+        merged = []
+
+        for sp in speech_facts:
+            if not merged:
+                merged.append(dict(sp))
+                continue
+
+            prev = merged[-1]
+            prev_txt = prev["text"].lower().strip()
+            curr_txt = sp["text"].lower().strip()
+
+            # Check temporal overlap between adjacent window detections
+            if sp["start_time"] < prev["end_time"] or abs(sp["start_time"] - prev["end_time"]) < 0.3:
+                if curr_txt == prev_txt or curr_txt in prev_txt:
+                    prev["end_time"] = max(prev["end_time"], sp["end_time"])
+                    continue
+                elif prev_txt in curr_txt:
+                    prev["text"] = sp["text"]
+                    prev["end_time"] = max(prev["end_time"], sp["end_time"])
+                    continue
+
+            merged.append(dict(sp))
+
+        return merged
+
     def _merge_adjacent_sound_events(
         self, events: list, min_event_duration: float = MIN_EVENT_DURATION
     ):
-        """Merges adjacent identical sound events and filters out events shorter than min_event_duration."""
+        """Step I (helper): Merges identical sound events and filters out events shorter than min_event_duration."""
         if not events:
             return []
 
-        # Sort by start time
         events.sort(key=lambda x: x["start_time"])
-
         merged = []
         current = None
 
@@ -312,7 +419,6 @@ class AudioExtractor:
             if current is None:
                 current = dict(ev)
             else:
-                # Merge if it's the same sound event label/text and adjacent/overlapping
                 if (
                     ev["text"] == current["text"]
                     and ev["start_time"] <= current["end_time"]
@@ -341,11 +447,45 @@ class AudioExtractor:
         batch_size: int = AUDIO_BATCH_SIZE,
         min_event_duration: float = MIN_EVENT_DURATION,
         rms_threshold: float = AUDIO_RMS_THRESHOLD,
-    ):
-        """Detects sound events by sliding a window over the audio."""
-        print(f"Detecting sound events in {audio_path}")
+    ) -> list:
+        """Standalone helper: runs CLAP background sound detection over sliding audio windows."""
+        all_facts = self.process_audio(
+            audio_path=audio_path,
+            chunk_length_s=chunk_length_s,
+            overlap_s=overlap_s,
+            threshold=threshold,
+            batch_size=batch_size,
+            min_event_duration=min_event_duration,
+            rms_threshold=rms_threshold,
+        )
+        return [f for f in all_facts if f.get("type") == "sound"]
 
-        # Load audio using standard wave module & numpy
+    def process_audio(
+        self,
+        audio_path: str,
+        chunk_length_s: float = AUDIO_CHUNK_LENGTH,
+        overlap_s: float = AUDIO_OVERLAP,
+        threshold: float = AUDIO_THRESHOLD,
+        batch_size: int = AUDIO_BATCH_SIZE,
+        min_event_duration: float = MIN_EVENT_DURATION,
+        rms_threshold: float = AUDIO_RMS_THRESHOLD,
+    ) -> list:
+        """
+        Executes the exact requested Audio Pipeline:
+          B: 16 kHz Mono Audio Input
+          C: Segment Audio (3s Window + 1s Overlap)
+          D: Non-Silent Segment Check (RMS >= threshold; Skip if silent)
+          E: Faster-Whisper Speech Detection + Timestamps
+          F: Speech Facts (Text + Start/End Time)
+          G: Remove Speech Intervals (Zero-out speech in segment)
+          H: LAION-CLAP Background Sound Detection on speech-removed audio
+          I: Sound Confidence + Minimum Duration Check
+          J: Sound Facts (Label + Start/End Time)
+          K: Merge + Sort All Audio Facts
+          L: Final Audio Timeline
+        """
+        print(f"[AudioExtractor] Processing audio pipeline on: {audio_path}")
+
         with wave.open(audio_path, "rb") as wf:
             n_channels = wf.getnchannels()
             sampwidth = wf.getsampwidth()
@@ -368,58 +508,75 @@ class AudioExtractor:
         duration = float(len(y)) / float(sr) if sr > 0 else 0.0
         step_s = chunk_length_s - overlap_s
 
-        chunks_to_process = []
-        current_time = 0.0
-        total_chunks = 0
+        speech_facts = []
+        bg_chunks_to_classify = []
+        total_segments = 0
+        skipped_silent = 0
 
-        # Extract audio chunks
+        # Steps C, D, E, F, G: Segment, check silence, transcribe speech, mute speech intervals
+        current_time = 0.0
         while current_time < duration:
             end_time = min(current_time + chunk_length_s, duration)
-            if end_time - current_time < 0.5:  # Skip very short final chunks
+            if end_time - current_time < 0.5:
                 break
 
-            total_chunks += 1
+            total_segments += 1
             start_sample = int(current_time * sr)
             end_sample = int(end_time * sr)
             chunk = y[start_sample:end_sample]
 
-            # RMS energy threshold check to skip low-energy (silent) chunks
-            rms = np.sqrt(np.mean(chunk**2)) if len(chunk) > 0 else 0.0
+            # Step D: Non-Silent Segment?
+            rms = float(np.sqrt(np.mean(chunk**2))) if len(chunk) > 0 else 0.0
+            if rms < rms_threshold:
+                # Step D -- No --> Skip
+                skipped_silent += 1
+                current_time += step_s
+                continue
 
-            if rms >= rms_threshold:
-                chunks_to_process.append(
+            # Step D -- Yes --> Step E: Faster-Whisper Speech Detection + Timestamps
+            seg_speech = self._transcribe_segment(chunk, current_time, end_time)
+
+            # Step F: Speech Facts (Text + Start/End Time)
+            for sp in seg_speech:
+                speech_facts.append(sp)
+
+            # Step G: Remove Speech Intervals
+            bg_audio = self._remove_speech_from_segment(
+                chunk, current_time, end_time, seg_speech, sr
+            )
+
+            # Check residual background audio energy for Step H
+            bg_rms = float(np.sqrt(np.mean(bg_audio**2))) if len(bg_audio) > 0 else 0.0
+            if bg_rms >= rms_threshold:
+                bg_chunks_to_classify.append(
                     {
                         "start_time": current_time,
                         "end_time": end_time,
-                        "audio": chunk,
+                        "audio": bg_audio,
                     }
                 )
 
             current_time += step_s
 
-        num_valid_chunks = len(chunks_to_process)
-        if total_chunks > num_valid_chunks:
-            print(
-                f"Skipped {total_chunks - num_valid_chunks}/{total_chunks} low-energy (silent) chunks using RMS threshold ({rms_threshold})."
-            )
+        if skipped_silent > 0:
+            print(f"[AudioExtractor] Skipped {skipped_silent}/{total_segments} silent segments (RMS < {rms_threshold}).")
 
-        raw_events = []
+        # Step H: LAION-CLAP Background Sound Detection (Batched)
+        raw_sound_events = []
+        num_bg_chunks = len(bg_chunks_to_classify)
 
-        # Batch CLAP inference
-        for i in range(0, num_valid_chunks, batch_size):
-            batch_items = chunks_to_process[i : i + batch_size]
+        for i in range(0, num_bg_chunks, batch_size):
+            batch_items = bg_chunks_to_classify[i : i + batch_size]
             batch_audios = [item["audio"] for item in batch_items]
 
-            chunk_idx_display = min(i + batch_size, num_valid_chunks)
-            print(f"Processing audio chunk {chunk_idx_display}/{num_valid_chunks}")
+            chunk_idx_display = min(i + batch_size, num_bg_chunks)
+            print(f"[AudioExtractor] Classifying background sound for segment {chunk_idx_display}/{num_bg_chunks}")
 
             with torch.inference_mode():
-                # HF pipeline batch inference
                 batch_classifications = self.audio_classifier(
                     batch_audios, candidate_labels=self.sound_event_labels
                 )
 
-                # Ensure output structure is a list of results per chunk
                 if (
                     len(batch_audios) == 1
                     and isinstance(batch_classifications, list)
@@ -428,49 +585,55 @@ class AudioExtractor:
                 ):
                     batch_classifications = [batch_classifications]
 
-                for item, classifications in zip(
-                    batch_items, batch_classifications
-                ):
-                    # Check top 2 candidate sound labels above threshold
+                for item, classifications in zip(batch_items, batch_classifications):
+                    # Step I: Sound Confidence Check
                     for top_class in classifications[:2]:
                         if (
-                            top_class["score"] > threshold
+                            top_class["score"] >= threshold
                             and "silence" not in top_class["label"].lower()
                         ):
-                            raw_events.append(
+                            # Step J: Sound Facts (Label + Start/End Time)
+                            raw_sound_events.append(
                                 {
                                     "type": "sound",
                                     "start_time": item["start_time"],
                                     "end_time": item["end_time"],
                                     "text": f"Sound of {top_class['label']}",
+                                    "label": top_class["label"],
                                     "score": top_class["score"],
                                 }
                             )
 
-            # Free GPU memory after each inference batch across CUDA and XPU
             empty_gpu_cache()
 
-        # Merge adjacent identical sound events
-        merged_events = self._merge_adjacent_sound_events(
-            raw_events, min_event_duration=min_event_duration
+        # Step I: Minimum Duration Check & Merge Adjacent Identical Sound Events
+        merged_sound_events = self._merge_adjacent_sound_events(
+            raw_sound_events, min_event_duration=min_event_duration
         )
-        return merged_events
+
+        # Step K: Merge + Sort All Audio Facts
+        merged_speech = self._merge_overlapping_speech(speech_facts)
+        all_audio_facts = merged_speech + merged_sound_events
+        all_audio_facts.sort(key=lambda x: (x["start_time"], x["end_time"]))
+
+        # Step L: Final Audio Timeline
+        print(f"[AudioExtractor] Extracted {len(merged_speech)} speech fact(s) and {len(merged_sound_events)} sound fact(s). Total: {len(all_audio_facts)}.")
+        return all_audio_facts
+
+    def process_audio_segments(self, *args, **kwargs):
+        """Backward-compatible alias for process_audio."""
+        return self.process_audio(*args, **kwargs)
 
     def process_video(self, video_path: str):
-        """Runs the full audio extraction pipeline."""
+        """
+        Step A: Input Video -> Step B: Extract Audio 16 kHz Mono -> Steps C-L: Process Audio Facts -> Step M: ChromaDB.
+        """
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
             wav_path = temp_wav.name
 
         try:
             self.extract_audio_from_video(video_path, wav_path)
-
-            speech_segments = self.transcribe_speech(wav_path)
-            sound_events = self.detect_sound_events(wav_path)
-
-            # Combine and sort by start time
-            all_audio_facts = speech_segments + sound_events
-            all_audio_facts.sort(key=lambda x: x["start_time"])
-
+            all_audio_facts = self.process_audio(wav_path)
             return all_audio_facts
         finally:
             if os.path.exists(wav_path):
@@ -480,4 +643,3 @@ class AudioExtractor:
 if __name__ == "__main__":
     # Simple test
     pass
-
