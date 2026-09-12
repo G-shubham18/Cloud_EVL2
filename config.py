@@ -89,17 +89,34 @@ def empty_gpu_cache():
 print(f"[Hardware Setup] Pipeline Running in Dual Mode: {'GPU (' + str(DEVICE) + ')' if IS_GPU else 'CPU (Optimized Fallback Mode)'}")
 print(f"[Hardware Setup] Selected Data Type: {TORCH_DTYPE}")
 
-# ------------------------------------------------------------------------------
-# HUGGING FACE AUTHENTICATION & SECURE TOKEN MANAGEMENT
-# ------------------------------------------------------------------------------
-# The Hugging Face access token is securely loaded from environment variables.
-# It is NEVER hardcoded, and NEVER logged or printed to stdout/stderr.
+# Automatically load .env file from BASE_DIR if present
+ENV_FILE = os.path.join(BASE_DIR, ".env")
+if os.path.exists(ENV_FILE):
+    try:
+        with open(ENV_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    k, v = k.strip(), v.strip().strip("\"'")
+                    if k not in os.environ and v:
+                        os.environ[k] = v
+    except Exception:
+        pass
+
+# The Hugging Face access token is loaded from environment variables, .env, or HF cache.
 # Supported env vars: HF_TOKEN, HUGGING_FACE_HUB_TOKEN, HUGGINGFACE_TOKEN
 HF_TOKEN = (
     os.environ.get("HF_TOKEN")
     or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     or os.environ.get("HUGGINGFACE_TOKEN")
 )
+if not HF_TOKEN:
+    try:
+        from huggingface_hub import get_token
+        HF_TOKEN = get_token()
+    except Exception:
+        pass
 if HF_TOKEN:
     HF_TOKEN = HF_TOKEN.strip()
 

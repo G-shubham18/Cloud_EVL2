@@ -422,6 +422,8 @@ class Generator:
             return self.clean_answer(raw_answer, question=question)
         except Exception as chat_err:
             chat_err_str = str(chat_err).lower()
+            if "permission" in chat_err_str or "inference provider" in chat_err_str:
+                return "Error: Hugging Face token is missing 'Make calls to Inference Providers' permission. Please enable this permission in your token settings at https://huggingface.co/settings/tokens."
             if "401" in chat_err_str or "unauthorized" in chat_err_str or "403" in chat_err_str:
                 return "Error: Hugging Face API authentication failed. Please provide a valid HF_TOKEN."
             if "503" in chat_err_str or "loading" in chat_err_str:
