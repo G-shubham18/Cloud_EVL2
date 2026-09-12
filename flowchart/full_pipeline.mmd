@@ -81,16 +81,15 @@ flowchart TD
 
     subgraph Stage3 ["Stage 3: Grounded Answer Generation"]
         direction TB
-        ContextBuild["Chronological Multimodal Context Builder<br/>[Visual, Speech, Sound, Unique Counts]"]:::stage3Style
-        LLMEngine["LLM Generation Engine (Dual Backend: Auto / API / Local)<br/>qwen2.5-v1-72b-instruct (Default) / gemma-4-31b / phi-3.5-vision"]:::stage3Style
-        ModelCache["Class-Level Singleton Model Caching<br/>(Shared Model Weights / HF InferenceClient)"]:::stage3Style
-        PromptRules["Benchmark Reasoning Rules<br/>(1-5 Word Direct Answers, Benchmark-Aligned)"]:::stage3Style
-        PostClean["Answer Post-Processing & Normalization<br/>(Number words 'two'->'2', clean text)"]:::stage3Style
-        FinalAns["Final Answer Output<br/>(Concise, Grounded, Benchmark-Aligned)"]:::outputStyle
+        ContextBuild["Build Chronological Context<br/>[Visual + Speech + Sound + Counts]"]:::stage3Style
+        StrictPrompt["Build Strict QA Prompt"]:::stage3Style
+        HF_API["Hugging Face Inference API<br/>HF_TOKEN"]:::stage3Style
+        LLMEngine["LLM<br/>Qwen / Gemma / Phi"]:::stage3Style
+        PostClean["Clean & Normalize Answer"]:::stage3Style
+        FinalAns["Final Answer<br/>1–5 Words"]:::outputStyle
 
-        ContextBuild --> LLMEngine
-        ModelCache -.-> LLMEngine
-        PromptRules --> LLMEngine --> PostClean --> FinalAns
+        ContextBuild --> StrictPrompt
+        StrictPrompt --> HF_API --> LLMEngine --> PostClean --> FinalAns
     end
 
     %% Pipeline Interconnections
@@ -100,8 +99,10 @@ flowchart TD
     VisualFacts --> FAISS
 
     Q --> QC
+    Q --> StrictPrompt
     ChromaDB --> DecoupledSearch
     FAISS --> DecoupledSearch
 
     SuffGate -- YES --> ContextBuild
     SuffGate -- NO (Fallback) --> DepthAlloc
+

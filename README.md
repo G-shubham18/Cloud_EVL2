@@ -313,7 +313,9 @@ flowchart TD
 │   ├── visual_extractor.mmd    # 16-Step visual extraction & multi-feature person tracking flowchart
 │   ├── audio_extractor.mmd     # Audio demux, Whisper ASR, speech interval removal, & CLAP SED flowchart
 │   ├── vector_index.mmd        # Hash-isolated ChromaDB & FAISS/NumPy indexer flowchart
-│   └── stag2.mmd               # Online retrieval, dynamic depth, reranking & Stage 3 generation flowchart
+│   ├── stag2.mmd               # Online retrieval, dynamic depth, reranking & Stage 3 generation flowchart
+│   └── stage3.mmd              # Grounded generation pipeline (HF Inference API / Local LLM, strict QA prompt, clean answer)
+
 │
 ├── dataset/                    # Default dataset directory
 │   ├── videos/                 # Video files (.mp4, .mkv, .webm, etc.)

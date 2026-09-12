@@ -1,0 +1,28 @@
+flowchart TD
+    %% Styling Classes
+    classDef inputStyle fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1;
+    classDef processStyle fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
+    classDef modelStyle fill:#ede7f6,stroke:#512da8,stroke-width:2px,color:#311b92;
+    classDef outputStyle fill:#e0f2f1,stroke:#00695c,stroke-width:2px,color:#004d40;
+
+    A["Retrieved Multimodal Evidence<br/>Visual + Speech + Sound + Counts"]:::inputStyle
+    B["User Question"]:::inputStyle
+    
+    C["Build Chronological Context"]:::processStyle
+    D["Build Strict QA Prompt"]:::processStyle
+    
+    E["Hugging Face Inference API<br/>HF_TOKEN"]:::modelStyle
+    
+    F["LLM<br/>Qwen / Gemma / Phi"]:::modelStyle
+    
+    G["Clean & Normalize Answer"]:::processStyle
+    
+    H["Final Answer<br/>1–5 Words"]:::outputStyle
+
+    A --> C
+    B --> D
+    C --> D
+    D --> E
+    E --> F
+    F --> G
+    G --> H

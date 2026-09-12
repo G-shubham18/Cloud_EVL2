@@ -528,22 +528,53 @@ class Generator:
                 return self._generate_api(question, context, image=image)
             return f"Error: Generation failed ({e})"
 
+    def build_chronological_context(self, candidates: list) -> str:
+        """Alias for format_context aligning with Stage 3 Pipeline Node C."""
+        return self.format_context(candidates)
+
+    def build_qa_prompt(self, question: str, context: str) -> Tuple[str, str]:
+        """Alias for _build_prompts aligning with Stage 3 Pipeline Node D."""
+        return self._build_prompts(question, context)
+
     def generate_answer(
         self,
         question: str,
-        context: str,
+        context: Union[str, List[Dict[str, Any]]],
         image: Optional[Any] = None
     ) -> str:
         """
-        Generates a direct, concise answer based on multi-modal evidence using the configured LLM.
-        Seamlessly dispatches to Hugging Face Serverless API or local PyTorch execution.
+        Stage 3 Grounded Generation Pipeline:
+            A. Retrieved Multimodal Evidence (Visual + Speech + Sound + Counts)
+            B. User Question
+            C. Build Chronological Context (build_chronological_context / format_context)
+            D. Build Strict QA Prompt (build_qa_prompt / _build_prompts)
+            E. Hugging Face Inference API (HF_TOKEN) / Local PyTorch Fallback
+            F. LLM (Qwen / Gemma / Phi)
+            G. Clean & Normalize Answer (clean_answer)
+            H. Final Answer (1–5 Words)
+
+        Args:
+            question: Natural language question (Node B).
+            context: Formatted context string OR retrieved candidate list (Node A).
+            image: Optional keyframe PIL Image or path.
+
+        Returns:
+            Concise, grounded benchmark answer of 1 to 5 words (Node H).
         """
+        # Node A -> Node C: Build Chronological Context if raw candidate list provided
+        if isinstance(context, list):
+            context_str = self.format_context(context)
+        else:
+            context_str = str(context) if context is not None else ""
+
+        # Node B + Node C -> Node D -> Node E / F -> Node G -> Node H
         if self._effective_backend == "api":
-            ans = self._generate_api(question, context, image=image)
+            ans = self._generate_api(question, context_str, image=image)
             # If API failed and not due to auth, and user has local model, try local
             if ans.startswith("Error:") and self.model is not None:
-                return self._generate_local(question, context, image=image)
+                return self._generate_local(question, context_str, image=image)
             return ans
         else:
-            ans = self._generate_local(question, context, image=image)
+            ans = self._generate_local(question, context_str, image=image)
             return ans
+

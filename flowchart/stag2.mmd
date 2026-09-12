@@ -54,16 +54,21 @@ flowchart TD
     end
 
     subgraph Stage3Generation ["5. Stage 3 Grounded Generation"]
-        AssembleContext["Assemble Chronological Evidence Context:<br/>[Visual - t_s to t_e] Structured Captions & Notes<br/>[Speech - t_s to t_e] Transcribed Utterances<br/>[Sound - t_s to t_e] Sound Events<br/>[Visual] Video-Level Unique Entity Counts"]:::stage3Style
-        LLMEngine["Configurable LLM Generator (Auto API / Local)<br/>qwen2.5-v1-72b-instruct (Default) / gemma-4-31b / phi-3.5-vision"]:::stage3Style
-        SharedCache["Class-Level Singleton Model Cache<br/>(Generator shared model / HF InferenceClient)"]:::stage3Style
-        ReasonRules["Strict Benchmark QA Reasoning Directives:<br/>1. Short direct answer (1 to 5 words)<br/>2. Multimodal grounded evidence verification<br/>3. Strict Yes/No binary verification<br/>4. Anti-double-counting unique entity rule<br/>5. Grounded precision"]:::stage3Style
-        CleanAnswer["Answer Post-Processing Normalizer:<br/>- Strips conversational prefixes<br/>- Converts number words ('two' -> '2')<br/>- Normalizes final grounded answer"]:::stage3Style
-        FinalResult["Final Grounded Answer Output<br/>(Benchmarked 1-to-5 Word Response)"]:::outputStyle
+        A_Evid["Retrieved Multimodal Evidence<br/>Visual + Speech + Sound + Counts"]:::stage3Style
+        C_Ctx["Build Chronological Context"]:::stage3Style
+        D_Prompt["Build Strict QA Prompt"]:::stage3Style
+        E_API["Hugging Face Inference API<br/>HF_TOKEN"]:::stage3Style
+        F_LLM["LLM<br/>Qwen / Gemma / Phi"]:::stage3Style
+        G_Clean["Clean & Normalize Answer"]:::stage3Style
+        H_Ans["Final Answer<br/>1–5 Words"]:::outputStyle
 
-        SuffGate -- Sufficient Evidence --> AssembleContext
-        AssembleContext --> LLMEngine
-        SharedCache -.-> LLMEngine
-        ReasonRules --> LLMEngine
-        LLMEngine --> CleanAnswer --> FinalResult
+        SuffGate -- Sufficient Evidence --> A_Evid
+        A_Evid --> C_Ctx
+        Q --> D_Prompt
+        C_Ctx --> D_Prompt
+        D_Prompt --> E_API
+        E_API --> F_LLM
+        F_LLM --> G_Clean
+        G_Clean --> H_Ans
     end
+
