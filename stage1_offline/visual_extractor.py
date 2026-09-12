@@ -1329,12 +1329,6 @@ class VisualExtractor:
                     "scene_change": True,
                     "resolution": [curr_w, curr_h],
                 })
-            else:
-                status_str = "SAME SCENE"
-                print(
-                    f"[Scene Detection] Frame {frame_count - 1} -> {frame_count} | "
-                    f"Change Score: {score:.2f} | Threshold: {threshold:.1f} | {status_str}"
-                )
 
             prev_frame = curr_frame
             frame_count += 1
