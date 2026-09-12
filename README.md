@@ -112,7 +112,7 @@ python ingestion.py --dataset_dir dataset
 ```
 *What happens:*
 - Recursively scans `dataset/videos/`.
-- **Audio Extraction**: Extracts audio speech (`Faster-Whisper large-v3`), mutes speech to isolate background, classifies acoustic sound events (`LAION-CLAP`), and localizes Left vs. Right stereo audio $\rightarrow$ saves to an isolated **ChromaDB** collection (`audio_collection`).
+- **Audio Extraction**: Extracts 16 kHz Mono audio, segments with 3s window (1s overlap), detects speech (`Faster-Whisper large-v3`), zeroes out speech intervals to isolate background, classifies acoustic sound events (`LAION-CLAP`), and merges facts $\rightarrow$ saves to an isolated **ChromaDB** collection (`audio_collection`).
 - **Visual Extraction (16-Step Pipeline)**: Detects scene cuts using consecutive frame HSV visual change score ($\ge 25.0$), runs open-vocabulary detection with **Grounding DINO** (`IDEA-Research/grounding-dino-tiny`), resolves detection overlaps (IoU > 0.45), filters frames with 4-metric image quality evaluation (sharpness $\ge 100$, brightness, contrast), removes redundancy using batched CLIP ViT cosine similarity ($> 0.90$), generates 7-section structured scene captions using **Qwen2.5-VL-3B-Instruct**, tracks persons across frames using clothing colors and spatial trajectory continuity (assigning persistent IDs `person_001`), computes video-level unique counts, and derives temporal action transitions using deterministic structured semantic diffing $\rightarrow$ saves to an isolated **FAISS** index (with resilient pure-NumPy fallback) and stores keyframe images in `data/keyframes/<video_id>/`.
 - All indices are uniquely stored per video in `data/vector_stores/<video_stem>_<hash>/` preventing cross-contamination.
 
@@ -311,7 +311,7 @@ flowchart TD
 ├── flowchart/                  # System Mermaid flowcharts (.mmd)
 │   ├── full_pipeline.mmd       # Master end-to-end architecture flowchart
 │   ├── visual_extractor.mmd    # 16-Step visual extraction & multi-feature person tracking flowchart
-│   ├── audio_extractor.mmd     # Audio demux, Whisper ASR, CLAP SED, & stereo localization flowchart
+│   ├── audio_extractor.mmd     # Audio demux, Whisper ASR, speech interval removal, & CLAP SED flowchart
 │   ├── vector_index.mmd        # Hash-isolated ChromaDB & FAISS/NumPy indexer flowchart
 │   └── stag2.mmd               # Online retrieval, dynamic depth, reranking & Stage 3 generation flowchart
 │

@@ -17,14 +17,26 @@ flowchart TD
         direction TB
         subgraph AudioBranch ["1A. Audio Processing Branch"]
             direction TB
-            FFmpeg["FFmpeg Audio Demuxer<br/>(16kHz Mono WAV)"]:::stage1Style
-            ChunkAudio["Fixed 3.0s Audio Chaining<br/>(1.0s Overlap, RMS Energy Check)"]:::stage1Style
-            Whisper["Faster-Whisper (large-v3)<br/>ASR Speech Transcription"]:::stage1Style
-            MuteSpeech["Speech Muting / Suppression<br/>(Isolate Background Audio)"]:::stage1Style
-            CLAP_Tag["LAION-CLAP (clap-htsat-unfused)<br/>50-Class Zero-Shot SED"]:::stage1Style
-            AudioFacts["Audio Facts Timeline<br/>(Speech + Sound Events)"]:::stage1Style
+            FFmpeg["FFmpeg Audio Extractor<br/>(16kHz Mono WAV)"]:::stage1Style
+            SegAudio["Segment Audio<br/>(3s Window + 1s Overlap)"]:::stage1Style
+            SilenceGate{"Non-Silent Segment?<br/>(RMS >= 0.001)"}:::gateStyle
+            Whisper["Faster-Whisper (large-v3)<br/>Speech Detection + Timestamps"]:::stage1Style
+            SpeechFacts["Speech Facts<br/>(Text + Start/End Time)"]:::stage1Style
+            MuteSpeech["Remove Speech Intervals<br/>(Zero-out speech in segment)"]:::stage1Style
+            CLAP_Tag["LAION-CLAP<br/>Background Sound Detection"]:::stage1Style
+            SoundGate{"Sound Confidence<br/>& Min Duration (>=0.5s)?"}:::gateStyle
+            SoundFacts["Sound Facts<br/>(Label + Start/End Time)"]:::stage1Style
+            MergeAudio["Merge & Sort Audio Facts<br/>(Chronological Timeline)"]:::stage1Style
+            AudioFacts["Final Audio Facts Timeline"]:::stage1Style
 
-            FFmpeg --> ChunkAudio --> Whisper --> MuteSpeech --> CLAP_Tag --> AudioFacts
+            FFmpeg --> SegAudio --> SilenceGate
+            SilenceGate -- YES --> Whisper
+            SilenceGate -- NO (Skip) --> SegAudio
+            Whisper --> SpeechFacts --> MergeAudio
+            Whisper --> MuteSpeech --> CLAP_Tag --> SoundGate
+            SoundGate -- YES --> SoundFacts --> MergeAudio
+            SoundGate -- NO (Skip) --> SegAudio
+            MergeAudio --> AudioFacts
         end
 
         subgraph VisualBranch ["1B. Visual Processing Branch (16-Step Pipeline)"]
